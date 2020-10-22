@@ -1,10 +1,5 @@
 RRTMGP-profile-stats-plots/
 intermediate_files/
-k-distribution-opt/
 obsolete/
-rte-rrtmgp-cpp/
 .ipynb_checkpoints/
 *.pdf
-pincus_k-distribution-opt/
-rte-rrtmgp/
-
