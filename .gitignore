@@ -5,3 +5,6 @@ obsolete/
 rte-rrtmgp-cpp/
 .ipynb_checkpoints/
 *.pdf
+pincus_k-distribution-opt/
+rte-rrtmgp/
+
