@@ -1,3 +1,9 @@
 [submodule "common"]
 	path = common
 	url = git@github.com:AER-RC/common.git
+[submodule "k-distribution-opt"]
+	path = k-distribution-opt
+	url = git@github.com:RobertPincus/k-distribution-opt.git
+[submodule "rte-rrtmgp"]
+	path = rte-rrtmgp
+	url = git@github.com:earth-system-radiation/rte-rrtmgp.git
