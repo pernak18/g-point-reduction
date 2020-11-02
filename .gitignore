@@ -3,3 +3,5 @@ intermediate_files/
 obsolete/
 .ipynb_checkpoints/
 *.pdf
+*.nc
+rrtmgp_garand_atmos
