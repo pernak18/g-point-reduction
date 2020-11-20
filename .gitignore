@@ -5,3 +5,5 @@ obsolete/
 *.pdf
 *.nc
 rrtmgp_garand_atmos
+k-distribution-opt
+rte-rrtmgp
