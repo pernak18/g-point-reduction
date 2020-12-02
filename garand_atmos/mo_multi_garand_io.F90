@@ -14,7 +14,7 @@
 ! This module reads profiles needed for RRTMGP and related calculations assuming a certain
 !   netCDF file layout
 
-module mo_test_files_io
+module mo_multi_garand_io
   use mo_rte_kind,           only: wp
   use mo_optical_props,      only: ty_optical_props, ty_optical_props_arry, &
                                    ty_optical_props_1scl, ty_optical_props_2str, ty_optical_props_nstr
@@ -1188,4 +1188,4 @@ contains
     end if
   end subroutine
   !--------------------------------------------------------------------------------------------------------------------
-end module mo_test_files_io
+end module mo_multi_garand_io

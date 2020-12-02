@@ -71,7 +71,7 @@ program rrtmgp_garand_atmos
   ! Serial netCDF I/O, provided in examples/
   !
   use mo_load_coefficients,  only: load_and_init
-  use mo_test_files_io,      only: read_atmos, is_lw, is_sw, &
+  use mo_multi_garand_io,    only: read_atmos, is_lw, is_sw, &
                                    read_lw_bc, read_sw_bc, read_lw_rt,  &
                                    write_fluxes_nCase, write_dir_fluxes_nCase, write_heating_rates_nCase, &
                                    write_spectral_disc, read_atmos_nCase
