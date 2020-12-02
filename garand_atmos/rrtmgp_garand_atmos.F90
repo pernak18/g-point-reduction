@@ -165,7 +165,8 @@ program rrtmgp_garand_atmos
   if(is_lw(input_file)) then
     call read_lw_bc(input_file, t_sfc, emis_sfc)
     ! Number of quadrature angles
-    call read_lw_rt(input_file, nang)
+    ! call read_lw_rt(input_file, nang)
+    nang = 3 ! to match LBLRTM 
   else
     call read_sw_bc(input_file, sza, tsi, tsi_scaling, sfc_alb_dir, sfc_alb_dif)
     allocate(mu0(size(sza)))

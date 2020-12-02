@@ -31,7 +31,7 @@ VPATH  = .:$(RRTMGP_ROOT)/examples:$(RRTMGP_ROOT)/extensions
 # Extra sources -- extensions to RRTMGP classes, shared infrastructure, local sources
 #
 ADDITIONS  = mo_load_coefficients.o mo_simple_netcdf.o
-ADDITIONS += mo_multi_garand_io.o mo_heating_rates.o 
+ADDITIONS += mo_multi_garand_io.o mo_heating_rates.o
 
 #
 # Targets
@@ -42,7 +42,7 @@ rrtmgp_garand_atmos: $(ADDITIONS) rrtmgp_garand_atmos.o
 rrtmgp_garand_atmos.o:  rrtmgp_garand_atmos.F90 $(ADDITIONS)
 mo_fluxes_byband.o:     mo_fluxes_byband.F90 mo_fluxes_byband_kernels.o
 mo_load_coefficients.o: mo_load_coefficients.F90 mo_simple_netcdf.o
-mo_test_files_io.o:     mo_test_files_io.F90     mo_simple_netcdf.o
+mo_multi_garand_io.o:   mo_multi_garand_io.F90     mo_simple_netcdf.o
 
 clean:
 	-rm ../rrtmgp_garand_atmos *.o *.mod *.optrpt
