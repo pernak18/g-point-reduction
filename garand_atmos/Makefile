@@ -31,7 +31,7 @@ VPATH  = .:$(RRTMGP_ROOT)/examples:$(RRTMGP_ROOT)/extensions
 # Extra sources -- extensions to RRTMGP classes, shared infrastructure, local sources
 #
 ADDITIONS  = mo_load_coefficients.o mo_simple_netcdf.o
-ADDITIONS += mo_test_files_io.o mo_heating_rates.o mo_fluxes_byband.o mo_fluxes_byband_kernels.o mo_rrtmgp_clr_all_sky.o
+ADDITIONS += mo_test_files_io.o mo_heating_rates.o 
 
 #
 # Targets

@@ -62,7 +62,7 @@ program rrtmgp_garand_atmos
   ! Output fluxes by spectral band in addition to broadband
   !   in extensions/
   !
-  use mo_fluxes_byband,      only: ty_fluxes_byband
+  use mo_fluxes,             only: ty_fluxes_broadband
   !
   ! Simple estimation of heating rates (in extensions/)
   !
@@ -121,7 +121,7 @@ program rrtmgp_garand_atmos
   type(ty_gas_concs),allocatable,dimension(:)  :: gas_concs
   class(ty_optical_props_arry), &
              allocatable :: optical_props
-  type(ty_fluxes_byband) :: fluxes
+  type(ty_fluxes_broadband) :: fluxes
 
   !
   ! Inputs to RRTMGP
@@ -282,11 +282,6 @@ program rrtmgp_garand_atmos
     !
     call stop_on_err(compute_heating_rate(flux_up(:,:,iCase), flux_dn(:,:,iCase), &
                                           p_lev(:,:,iCase), heating_rate(:,:,iCase)))
-    do b = 1, nbnd
-      call stop_on_err(compute_heating_rate(bnd_flux_up(:,:,b,iCase), bnd_flux_dn(:,:,b,iCase), &
-                                            p_lev(:,:,iCase), bnd_heating_rate(:,:,b,iCase)))
-    end do
-
   enddo
   !
   ! ... and write everything out
@@ -309,12 +304,8 @@ contains
     fluxes%flux_up      => flux_up(colS:colE,:,iCase)
     fluxes%flux_dn      => flux_dn(colS:colE,:,iCase)
     fluxes%flux_net     => flux_net(colS:colE,:,iCase)
-    fluxes%bnd_flux_up  => bnd_flux_up(colS:colE,:,:,iCase)
-    fluxes%bnd_flux_dn  => bnd_flux_dn(colS:colE,:,:,iCase)
-    fluxes%bnd_flux_net => bnd_flux_net(colS:colE,:,:,iCase)
     if(is_sw(input_file)) then
       fluxes%flux_dn_dir     => flux_dir(colS:colE,:,iCase)
-      fluxes%bnd_flux_dn_dir => bnd_flux_dir(colS:colE,:,:,iCase)
     end if
     call stop_on_err(gas_concs(iCase)%get_subset(colS, nSubcols, gas_concs_subset))
     if(is_sw(input_file)) then
