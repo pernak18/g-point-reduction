@@ -108,11 +108,7 @@ program rrtmgp_garand_atmos
   real(wp), dimension(:,:  ,:), target, &
                                allocatable ::     flux_up,      flux_dn, &
                                                   flux_net,     flux_dir
-  real(wp), dimension(:,:,:,:), target, &
-                               allocatable :: bnd_flux_up,  bnd_flux_dn, &
-                                              bnd_flux_net, bnd_flux_dir
   real(wp), dimension(:,:,:),    allocatable :: heating_rate
-  real(wp), dimension(:,:,:,:),  allocatable :: bnd_heating_rate
   !
   ! Derived types from the RTE and RRTMGP libraries
   !
@@ -195,11 +191,9 @@ program rrtmgp_garand_atmos
 
   allocate(    flux_up (ncol,nlay+1     ,nCase),     flux_dn(ncol,nlay+1     ,nCase), &
                flux_net(ncol,nlay+1     ,nCase))
-  allocate(bnd_flux_up (ncol,nlay+1,nbnd,nCase), bnd_flux_dn(ncol,nlay+1,nbnd,nCase), &
-           bnd_flux_net(ncol,nlay+1,nbnd,nCase))
-  allocate(heating_rate(ncol,nlay,nCase), bnd_heating_rate(ncol,nlay,nbnd,nCase))
+  allocate(heating_rate(ncol,nlay,nCase))
   if(is_sw(input_file)) &
-    allocate(flux_dir(ncol,nlay+1,nCase), bnd_flux_dir(ncol,nlay+1,nbnd,nCase))
+    allocate(flux_dir(ncol,nlay+1,nCase))
 
   !
   ! LW calculations neglect scattering; SW calculations use the 2-stream approximation
@@ -287,10 +281,10 @@ program rrtmgp_garand_atmos
   ! ... and write everything out
   !
   call write_spectral_disc(input_file, optical_props)
-  call write_fluxes_nCase(input_file, flux_up, flux_dn, flux_net, bnd_flux_up, bnd_flux_dn, bnd_flux_net)
-  call write_heating_rates_nCase(input_file, heating_rate, bnd_heating_rate)
+  call write_fluxes_nCase(input_file, flux_up, flux_dn, flux_net)
+  call write_heating_rates_nCase(input_file, heating_rate)
   if(k_dist%source_is_external()) &
-    call write_dir_fluxes_nCase(input_file, flux_dir, bnd_flux_dir)
+    call write_dir_fluxes_nCase(input_file, flux_dir)
 
 contains
 

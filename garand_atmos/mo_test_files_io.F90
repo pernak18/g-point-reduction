@@ -109,7 +109,7 @@ contains
       if (var_exists(ncid, 'vmr_' // trim(gas_names(igas)))) then
         call stop_on_err(gas_concs%set_vmr( &
           gas_names(igas), read_field(ncid, 'vmr_' // trim(gas_names(igas)), ncol, nlay) &
-        )) 
+        ))
       end if
     end do
 
@@ -179,7 +179,7 @@ contains
     !
     allocate(gas_concs(nCase))
     do iCase = 1,nCase
-       call stop_on_err(gas_concs(iCase)%init(found_gases(1:ngases))) 
+       call stop_on_err(gas_concs(iCase)%init(found_gases(1:ngases)))
     end do
     !
     ! ...Finally, set gas concentrations
@@ -415,8 +415,8 @@ contains
     enddo
     if(present(bnd_flux_up )) call stop_on_err(write_field(ncid, "band_flux_up",  bnd_flux_up2))
     if(present(bnd_flux_dn )) call stop_on_err(write_field(ncid, "band_flux_dn",  bnd_flux_dn2))
-    if(present(bnd_flux_net)) call stop_on_err(write_field(ncid, "band_flux_net", bnd_flux_net2))   
-    
+    if(present(bnd_flux_net)) call stop_on_err(write_field(ncid, "band_flux_net", bnd_flux_net2))
+
     ncid = nf90_close(ncid)
   end subroutine write_fluxes_nCase
   !--------------------------------------------------------------------------------------------------------------------
@@ -521,7 +521,8 @@ contains
   subroutine write_heating_rates_nCase(fileName, heating_rate, bnd_heating_rate)
     character(len=*),             intent(in) :: fileName
     real(wp), dimension(:,:  ,:), intent(in) ::     heating_rate
-    real(wp), dimension(:,:,:,:), intent(in) :: bnd_heating_rate
+    real(wp), dimension(:,:,:,:), optional, &
+                                  intent(in) :: bnd_heating_rate
     ! -------------------
     integer :: ncid
     integer :: ncol, nlay, nband, nCase, icase
@@ -540,12 +541,14 @@ contains
     nCase = size(heating_rate,3)
 
     call create_var(ncid,      "heating_rate",          ["col   ", "lay   ", "record"],         [ncol, nlay, ncase])
-    call create_var(ncid, "band_heating_rate", ["band  ", "col   ", "lay   ","record"], [nband, ncol, nlay,ncase])
-
     call stop_on_err(write_field(ncid,     "heating_rate",                     heating_rate))
-    do iCase=1,nCase
-       call stop_on_err(write_field(ncid, "band_heating_rate", reorder(bnd_heating_rate(:,:,:,iCase))))
-    enddo
+
+    if(present(bnd_heating_rate)) then
+      call create_var(ncid, "band_heating_rate", ["band  ", "col   ", "lay   ","record"], [nband, ncol, nlay,ncase])
+      do iCase=1,nCase
+         call stop_on_err(write_field(ncid, "band_heating_rate", reorder(bnd_heating_rate(:,:,:,iCase))))
+      enddo
+    end if
 
     ncid = nf90_close(ncid)
   end subroutine write_heating_rates_nCase
