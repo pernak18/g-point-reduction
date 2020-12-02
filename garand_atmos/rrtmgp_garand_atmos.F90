@@ -182,15 +182,14 @@ program rrtmgp_garand_atmos
   !
   ! Problem sizes; allocate output arrays for full problem
   !
-  ncol = size(p_lay, 1)
-  nlay = size(p_lay, 2)
+  ncol  = size(p_lay,1)
+  nlay  = size(p_lay,2)
   nCase = size(p_lay,3)
   nbnd = k_dist%get_nband()
   ngpt = k_dist%get_ngpt()
   top_at_1 = p_lay(1, 1, 1) < p_lay(1, nlay, 1)
 
-  allocate(    flux_up (ncol,nlay+1     ,nCase),     flux_dn(ncol,nlay+1     ,nCase), &
-               flux_net(ncol,nlay+1     ,nCase))
+  allocate(flux_up(ncol,nlay+1,nCase), flux_dn(ncol,nlay+1,nCase), flux_net(ncol,nlay+1,nCase))
   allocate(heating_rate(ncol,nlay,nCase))
   if(is_sw(input_file)) &
     allocate(flux_dir(ncol,nlay+1,nCase))
@@ -281,7 +280,7 @@ program rrtmgp_garand_atmos
   ! ... and write everything out
   !
   call write_spectral_disc(input_file, optical_props)
-  call write_fluxes_nCase(input_file, flux_up, flux_dn, flux_net)
+  call write_fluxes_nCase (input_file, flux_up, flux_dn, flux_net)
   call write_heating_rates_nCase(input_file, heating_rate)
   if(k_dist%source_is_external()) &
     call write_dir_fluxes_nCase(input_file, flux_dir)
