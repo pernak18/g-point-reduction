@@ -272,10 +272,16 @@ contains
       call stop_on_err("read_lw_bc: can't find file " // trim(fileName))
 
     ncol  = get_dim_size(ncid, 'col')
-    nband = get_dim_size(ncid, 'band')
-
-    t_sfc    =  read_field(ncid, 't_sfc',           ncol)
-    emis_sfc =  read_field(ncid, 'emis_sfc', nband, ncol)
+    t_sfc     =  read_field(ncid, 't_sfc',           ncol)
+    !
+    ! In case the spectral dimension has been removed.
+    !
+    if(var_exists(ncid, 'band')) then
+      nband = get_dim_size(ncid, 'band')
+      emis_sfc =  read_field(ncid, 'emis_sfc', nband, ncol)
+    else
+      emis_sfc =  reshape(read_field(ncid, 'emis_sfc', ncol), shape = [1,ncol])
+    end if
 
     ncid = nf90_close(ncid)
   end subroutine read_lw_bc
@@ -316,8 +322,13 @@ contains
 
     sza         =  read_field(ncid, 'solar_zenith_angle',        ncol)
     tsi         =  read_field(ncid, 'total_solar_irradiance',    ncol)
-    sfc_alb_dir =  read_field(ncid, 'sfc_alb_direct',  nband, ncol)
-    sfc_alb_dif =  read_field(ncid, 'sfc_alb_diffuse', nband, ncol)
+    if(var_exists(ncid, 'band')) then
+      sfc_alb_dir =  read_field(ncid, 'sfc_alb_direct',  nband, ncol)
+      sfc_alb_dif =  read_field(ncid, 'sfc_alb_diffuse', nband, ncol)
+    else
+      sfc_alb_dir = reshape(read_field(ncid, 'sfc_alb_direct',  ncol), shape = [1,ncol])
+      sfc_alb_dif = reshape(read_field(ncid, 'sfc_alb_diffuse', ncol), shape = [1,ncol])
+    end if
 
     ! read tsi_scaling only if variable is present in the netCDF file
     if(var_exists(ncid, 'tsi_scaling')) tsi_scaling = read_field(ncid, 'tsi_scaling' )
