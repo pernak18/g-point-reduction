@@ -166,7 +166,7 @@ program rrtmgp_garand_atmos
     call read_lw_bc(input_file, t_sfc, emis_sfc)
     ! Number of quadrature angles
     ! call read_lw_rt(input_file, nang)
-    nang = 3 ! to match LBLRTM 
+    nang = 3 ! to match LBLRTM
   else
     call read_sw_bc(input_file, sza, tsi, tsi_scaling, sfc_alb_dir, sfc_alb_dif)
     allocate(mu0(size(sza)))
@@ -335,8 +335,8 @@ contains
                                  top_at_1,                 &
                                  mu0(colS:colE),           &
                                  toa_flux,                 &
-                                 sfc_alb_dir(:,colS:colE), &
-                                 sfc_alb_dif(:,colS:colE), &
+                                 sfc_alb_dir(1:nbnd,colS:colE), &
+                                 sfc_alb_dif(1:nbnd,colS:colE), &
                                  fluxes))
     else
       !
@@ -368,7 +368,7 @@ contains
       call stop_on_err(rte_lw(optical_props,            &
                                  top_at_1,              &
                                  lw_sources,            &
-                                 emis_sfc(:,colS:colE), &
+                                 emis_sfc(1:nbnd,colS:colE), &
                                  fluxes, n_gauss_angles = nang))
     end if
   end subroutine compute_fluxes
