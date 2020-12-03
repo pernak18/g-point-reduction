@@ -50,8 +50,12 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
     xaWeights = xa.DataArray(
         weights, dims={'gpt': range(len(weights))}, name='gpt_weights')
 
-    minorStr = ['minor_absorber_intervals_lower', 
-                'minor_absorber_intervals_upper']
+    # for minor contributors
+    alts = ['lower', 'upper']
+    absIntDims = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
+    contribDims = ['contributors_{}'.format(alt) for alt in alts]
+    contribVars = ['kminor_{}'.format(alt) for alt in alts]
+    zipMinor = zip(absIntDims, contribDims, contribVars)
 
     bandFiles = []
     with xa.open_dataset(kFileNC) as kAllObj:
@@ -61,14 +65,11 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
         # for minor absorbers, determine bands for contributions 
         # based on initial, full-band k-distribution (i.e., 
         # before combining g-points)
-        # possibly less efficient, but more readable way to get 
-        # index of band whose g-point limits match the limits from 
-        # the contributor; not robust -- assumes each limit only 
-        # corresponds to one band; troposphere first
         minorLims = {}
         limStr = ['minor_limits_gpt_lower', 'minor_limits_gpt_upper']
-        for minor, lim in zip(minorStr, limStr):
+        for minor, lim in zip(absIntDims, limStr):
             minorLims[minor] = kAllObj[lim].values
+        # end minor loop
 
         for iBand in kAllObj.bnd.values:
             # make a separate netCDF for each band
@@ -84,6 +85,62 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                 ncDat = kAllObj[ncVar]
 
                 varDims = kAllObj[ncVar].dims
+                skipMinor = False
+
+                # minor absorber intervals
+                # WE ARE HANDLING 2 DIFFERENT TYPES OF ncVar here -- 2-D for
+                # vars with absInt dim and 3-D for vars with contrib dim
+                # because we use iAbsInt for both
+                zipMinor = zip(absIntDims, contribDims, contribVars)
+                for absIntDim, contribDim, contribVar in zipMinor:
+                    if contribDim in varDims: skipMinor = True
+
+                    if absIntDim in varDims:
+                        skipMinor = True
+                        contribDS = kAllObj[contribVar]
+
+                        # https://stackoverflow.com/a/25823710
+                        # possibly less efficient, but more readable way to 
+                        # get index of band whose g-point limits match the 
+                        # limits from the contributor; not robust -- assumes
+                        # contributions only happen in a single band
+                        iAbsInt = np.where(
+                            (minorLims[absIntDim] == gLims[iBand]).all(
+                            axis=1))[0]
+                        iContrib = [i*len(weights) for i in iAbsInt]
+
+                        if iAbsInt.size == 0:
+                            # TO DO: also not robust -- make it more so;
+                            # it assumes this conditional is met with only 
+                            # arrays of dimension absIntDim x string_len (= 32)
+                            # or absIntDim x pair (=2)
+                            aLen2 = 2 if 'pair' in varDims else 32
+                            absIntDA = xa.DataArray(
+                                np.zeros((0, len2)), dims=varDims)
+
+                            cDims = contribDS.dims
+                            cLen1, cLen2, cLen3 = contribDS.shape
+                            contribDA = xa.DataArray(
+                                np.zeros((cLen1, cLen2, 0)), dims=cDims)
+                        else:
+                            absIntDA = ncDat.isel({absIntDim: iAbsInt})
+                            contribDA = contribDS.isel({contribDim: iAbsInt})
+                        # endif iKeep
+
+                        # write variable to output dataset
+                        outDS[ncVar] = xa.DataArray(absIntDA)
+                        outDS[contribVar] = xa.DataArray(contribDA)
+                    # endif absIntDim
+                # end zipMinor loop
+
+                # have already stored minor contributor variables
+                if skipMinor: continue
+
+                # define "local" g-point limits for given band rather than 
+                # using limits from entire k-distribution
+                if 'limits_gpt' in ncVar: ncDat[:] = [1, len(weights)]
+                if 'kminor_start' in ncVar: ncDat[:] = 1
+
                 if 'gpt' in varDims:
                     # grab only the g-point information for this band
                     # and convert to zero-offset
@@ -95,26 +152,7 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                     ncDat = ncDat.isel(bnd=[iBand])
                 # endif
 
-                for minor in minorStr:
-                    if minor in varDims:
-                        # for minor absorbers, determine bands for contributions 
-                        # based on initial, full-band k-distribution (i.e., 
-                        # before combining g-points)
-                        # https://stackoverflow.com/a/25823710
-                        # possibly less efficient, but more readable way to get 
-                        # index of band whose g-point limits match the limits from 
-                        # the contributor; not robust -- assumes each limit only 
-                        # corresponds to one band; troposphere first
-                        iKeep = np.where(
-                            (minorLims[minor] == gLims[iBand]).all(axis=1))[0]
-                        #print(iBand, ncVar, minor, varDims, iKeep)
-                        if iKeep.size == 0: pass
-                        ncDat = ncDat.isel({minor: iKeep})
-                    # endif minor
-                # end minor loop
-
                 # write variable to output dataset
-                print(iBand, ncVar)
                 outDS[ncVar] = xa.DataArray(ncDat)
             # end ncVar loop
 
