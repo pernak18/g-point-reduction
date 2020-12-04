@@ -117,17 +117,13 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                             # it assumes this conditional is met with only
                             # arrays of dimension minor x string_len (= 32) or
                             # minor x 2
+                            # can't have 0-len dimension, so make dummy data
                             if 'pair' in varDims:
-                                len2, dim2, val2 = 2, 'pair', 0
+                                ncDat = xa.DataArray(np.zeros((1, 2)), 
+                                    dims=(absIntDim, 'pair'))
                             else:
-                                len2, dim2, val2 = 32, 'string_len', None
-                            # endif
-
-                            # can't have 0-len dimension, so make
-                            # dummy data
-                            ncDat = xa.DataArray(
-                                np.zeros((1, len2)), dims=(absIntDim, dim2))
-                            ncDat[:] = val2
+                                ncDat = ncDat.isel({absIntDim: 0})
+                            # endif varDims
                         else:
                             ncDat = ncDat.isel({absIntDim: iKeep})
                         # endif iKeep
