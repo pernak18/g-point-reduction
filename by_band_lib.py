@@ -50,24 +50,27 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
     xaWeights = xa.DataArray(
         weights, dims={'gpt': range(len(weights))}, name='gpt_weights')
 
+    # for minor contributors
     alts = ['lower', 'upper']
-    minorStr = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
-    contribStr = ['contributors_{}'.format(alt) for alt in alts]
+    absIntDims = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
+    contribDims = ['contributors_{}'.format(alt) for alt in alts]
+    limDims = ['minor_limits_gpt_{}'.format(alt) for alt in alts]
+    contribVars = ['kminor_{}'.format(alt) for alt in alts]
+    startVars = ['kminor_start_{}'.format(alt) for alt in alts]
 
     bandFiles = []
-    with xa.open_dataset(kFileNC) as kAllObj:
-        gLims = kAllObj.bnd_limits_gpt.values
-        ncVars = list(kAllObj.keys())
+    with xa.open_dataset(kFileNC) as kAllDS:
+        gLims = kAllDS.bnd_limits_gpt.values
+        ncVars = list(kAllDS.keys())
 
         # for minor absorbers, determine bands for contributions 
         # based on initial, full-band k-distribution (i.e., 
         # before combining g-points)
-        minorLims = {}
-        limStr = ['minor_limits_gpt_lower', 'minor_limits_gpt_upper']
-        for minor, lim in zip(minorStr, limStr):
-            minorLims[minor] = kAllObj[lim].values
+        minorLims, iKeepAll = {}, {}
+        for absIntDim, lim in zip(absIntDims, limDims):
+            minorLims[absIntDim] = kAllDS[lim].values
 
-        for iBand in kAllObj.bnd.values:
+        for iBand in kAllDS.bnd.values:
             # make a separate netCDF for each band
             outNC = '{}/coefficients_{}_band{:02d}.nc'.format(
                 outDir, domain, iBand+1)
@@ -78,9 +81,9 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
 
             # determine which variables need to be parsed
             for ncVar in ncVars:
-                ncDat = kAllObj[ncVar]
+                ncDat = kAllDS[ncVar]
+                varDims = kAllDS[ncVar].dims
 
-                varDims = kAllObj[ncVar].dims
                 if 'gpt' in varDims:
                     # grab only the g-point information for this band
                     # and convert to zero-offset
@@ -92,15 +95,22 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                     ncDat = ncDat.isel(bnd=[iBand])
                 # endif
 
-                for minor in minorStr:
-                    if minor in varDims:
+                # have to process contributors vars *after* absorber intervals
+                if contribDims[0] in varDims: continue
+                if contribDims[1] in varDims: continue
+
+                for absIntDim in absIntDims:
+                    if absIntDim in varDims:
                         # https://stackoverflow.com/a/25823710
                         # possibly less efficient, but more readable way to 
                         # get index of band whose g-point limits match the 
                         # limits from the contributor; not robust -- assumes
                         # contributions only happen in a single band
+                        # limits for contributors must match BOTH band limits
                         iKeep = np.where(
-                            (minorLims[minor] == gLims[iBand]).all(axis=1))[0]
+                            (minorLims[absIntDim] == gLims[iBand]).all(
+                            axis=1))[0]
+                        iKeepAll[absIntDim] = np.array(iKeep)
 
                         if iKeep.size == 0:
                             # TO DO: also not robust -- make it more so;
@@ -114,12 +124,12 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                             # endif
 
                             ncDat = xa.DataArray(
-                                np.zeros((0, len2)), dims=(minor, dim2))
+                                np.zeros((0, len2)), dims=(absIntDim, dim2))
                         else:
-                            ncDat = ncDat.isel({minor: iKeep})
+                            ncDat = ncDat.isel({absIntDim: iKeep})
                         # endif iKeep
-                    # endif minor
-                # end minor loop
+                    # endif absIntDim
+                # end absIntDim loop
 
                 # define "local" g-point limits for given band rather than 
                 # using limits from entire k-distribution
@@ -129,6 +139,43 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                 # write variable to output dataset
                 outDS[ncVar] = xa.DataArray(ncDat)
             # end ncVar loop
+
+            # now process upper and lower contributors
+            # this is where things get WACKY
+            zipMinor = zip(absIntDims, contribDims, contribVars, startVars)
+            for absIntDim, contribDim, contribVar, startVar in zipMinor:
+                contribDS = kAllDS[contribVar]
+
+                # "You want kminor_lower[:,:,i:i+16] 
+                # (i being 1-based here, using  i = minor_start_lower(j) ) 
+                # and the j are the intervals that fall in the band"
+                startDS = kAllDS[startVar]
+                iKeep = []
+                for j in iKeepAll[absIntDim]:
+                    iStart = int(startDS.isel({absIntDim: j}))
+                    iEnd = iStart + len(weights)
+                    iKeep.append(np.arange(iStart, iEnd).astype(int)-1)
+                # end j loop
+
+                # need a vector to use with array indexing
+                iKeep = np.array(iKeep).flatten()
+
+                if iKeep.size == 0:
+                    # TO DO: also not robust -- make it more so;
+                    varShape = contribDS.shape
+                    newShape = (varShape[0], varShape[1], 0)
+
+                    contribDS = xa.DataArray(
+                        np.zeros(newShape), dims=contribDS.dims)
+                    startDS = xa.DataArray(np.zeros((0)), dims=absIntDim)
+                else:
+                    startDS = startDS.isel({absIntDim: iKeepAll[absIntDim]})
+                    contribDS = contribDS.isel({contribDim: iKeep})
+                # endif iKeep
+
+                outDS[startVar] = xa.DataArray(startDS)
+                outDS[contribVar] = xa.DataArray(contribDS)
+            # end zipMinor loop
 
             # write weights to output file
             outDS['gpt_weights'] = xaWeights
