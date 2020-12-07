@@ -37,6 +37,17 @@ def pathCheck(path, mkdir=False):
 def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
     """
     Split a full k-distribution into separate files for each band
+
+    Input
+        kFileNC -- string, netCDF with full absorption coefficient 
+            distribution
+    Output
+        bandFiles -- list of strings, full paths to k-distribution 
+            files for each band
+    Keywords
+        outDir -- string, relative path to directory where all 
+            bandFiles are written
+        domain -- string, longwave (lw) or shortwave (sw)
     """
 
     pathCheck(outDir, mkdir=True)
@@ -72,8 +83,8 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
 
         for iBand in kAllDS.bnd.values:
             # make a separate netCDF for each band
-            outNC = '{}/coefficients_{}_band{:02d}.nc'.format(
-                outDir, domain, iBand+1)
+            outNC = '{}/{}/coefficients_{}_band{:02d}.nc'.format(
+                os.getcwd(), outDir, domain, iBand+1)
 
             # Dataset that will be written to netCDF with new variables and
             # unedited global attribues
@@ -174,8 +185,9 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                     contribDS = contribDS.isel({contribDim: iKeep})
                 # endif iKeep
 
-                # for a given band, g-point indices are just 1-16
-                #outDS[startVar] = xa.ones_like(startDS)
+                # kminor_start_* needs to refer to local bands now, and 
+                # needs to be unit-offset
+                outDS[startVar] = startDS-startDS[0]+1
                 outDS[contribVar] = xa.DataArray(contribDS)
             # end zipMinor loop
 
@@ -332,6 +344,9 @@ def fluxCompute(inK, outFlux, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
         None
     """
 
+    curDir = os.getcwd()
+    print('Computing flux for {}'.format(inK))
+
     pathCheck(fluxDir, mkdir=True)
     os.chdir(fluxDir)
 
@@ -353,12 +368,12 @@ def fluxCompute(inK, outFlux, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
     rPaths.insert(1, inRRTMGP)
 
     # run the model
-    sub.call(rBase)
+    sub.call(rPaths)
 
     # save outputs (inRRTMGP gets overwritten every run)
-    os.rename(inRRTMGP, outFlux)
+    os.rename(inRRTMGP, '{}/{}'.format(curDir, outFlux))
 
-    os.chdir(topDir)
+    os.chdir(curDir)
 
 # end fluxCompute()
 
