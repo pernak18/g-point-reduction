@@ -12,10 +12,10 @@ for path in PATHS: sys.path.append(path)
 
 # GLOBAL VARIABLES (paths)
 PROJECT = '/global/project/projectdirs/e3sm/pernak18/'
-EXE = '{}/g-point-reduction/k-distribution-opt/rrtmgp_garand_atmos'.format(
+EXE = '{}/g-point-reduction/garand_atmos/rrtmgp_garand_atmos'.format(
     PROJECT)
 GARAND = '{}/reference_netCDF/g-point-reduce/'.format(PROJECT) + \
-  'lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc'
+  'multi_garand_template.nc'
 CWD = os.getcwd()
 
 # user must do `pip install xarray` on cori (or other NERSC machines)
@@ -195,7 +195,7 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
             outDS['gpt_weights'] = xaWeights
 
             outDS.to_netcdf(outNC, mode='w')
-            print('Completed {}'.format(outNC))
+            #print('Completed {}'.format(outNC))
             bandFiles.append(outNC)
         # end band loop
     # endwith
@@ -322,7 +322,7 @@ def recordDimRename(inNC, outNC):
     print('Completed {}'.format(outNC))
 # end recordDimRename()
 
-def fluxCompute(inK, outFlux, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
+def fluxCompute(inK, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
                 fluxDir='flux_calculations'):
     """
     Compute fluxes for a given k-distribution and set of atmospheric
@@ -330,8 +330,6 @@ def fluxCompute(inK, outFlux, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
 
     Input
         inK -- string, absolute path to netCDF with k-distribution
-        outFlux -- string, absolute path to netCDF with RRTMGP-calculated
-            fluxes
 
     Keywords
         atmSpecFile -- string, absolute path to netCDF with
@@ -341,11 +339,15 @@ def fluxCompute(inK, outFlux, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
         fluxDir -- string, path to directory where fluxes will be calculated
 
     Output
-        None
+        Fluxes written to outFile
     """
 
+    base = os.path.basename(inK)
+    base = base.replace('coefficients', 'flux')
+    outFile = '{}/{}'.format(fluxDir, base)
+
     curDir = os.getcwd()
-    print('Computing flux for {}'.format(inK))
+    #print('Computing flux for {}'.format(inK))
 
     pathCheck(fluxDir, mkdir=True)
     os.chdir(fluxDir)
@@ -367,11 +369,12 @@ def fluxCompute(inK, outFlux, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
     # assuming the RRTMGP call sequence is `exe inputs k-dist`
     rPaths.insert(1, inRRTMGP)
 
-    # run the model
+    # run the model with inputs
     sub.call(rPaths)
 
     # save outputs (inRRTMGP gets overwritten every run)
-    os.rename(inRRTMGP, '{}/{}'.format(curDir, outFlux))
+    os.rename(inRRTMGP, '{}/{}'.format(curDir, outFile))
+    print('Wrote {}'.format(outFile))
 
     os.chdir(curDir)
 
@@ -448,6 +451,63 @@ def exeTest(kFileNC, startDir=CWD):
 
     os.chdir(startDir)
 # end exeTest()
+
+def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles):
+    """
+    needs a lot of work -- just spitballin
+    """
+
+    iComb = 1
+    while True:
+        print(kBandFile)
+
+        # start with `kFile` with no g-point combinations for a given band
+        kObj = kDistOptBand(kBandFile, band, DOLW, IFORCING, iComb)
+
+        # combine g-points in band and generate corresponding netCDF
+        kObj.gPointCombine()
+
+        # if there are not enough g-points to combine, stop iterating
+        if kObj.nGpt == 1: break
+
+        # run RRTMGP on all files self.trialNC (each g-point combination)
+        # generate input dictionaries for fluxComputePool()
+        kObj.configParallel()
+        continue
+
+        # calculate fluxes corresponding to every g-point combination
+        # break out of kDistOptBand object for 
+        # computation of band fluxes in parallel
+        fluxComputePool(kObj.fluxInputs)
+
+        # replace original fluxes for band with modified one
+        fluxesMod = list(fluxFiles)
+        fluxesMod.remove(fluxFiles[iBand])
+        fluxesMod.insert(iBand, outFile)
+
+        # combine fluxes from modified band with unmodified bands
+        #BYBAND.fluxCombine(kFilesMod)
+
+        #kObj.runBandRRTMGP()
+
+        # determine optimal combination
+        kObj.findOptimal(kObj.iCombine)
+
+        # keep a copy of the optimal netCDF
+        shutil.copy2(kObj.optNC, '{}/{}'.format(
+            kObj.optDir, os.path.basename(kObj.optNC)))
+        
+        # replace `kFile` with netCDF that corresponds to g-point combination
+        # that minimizes the cost function
+        kBandFile = kObj.optNC
+
+        # next iteration
+        iComb += 1
+    # end while
+
+    # cleanup
+    shutil.rmtree(kObj.workDir)
+# end bandOptimize
 
 class kDistOptBand:
     def __init__(self, inFile, band, lw, idxForce, iCombine,
@@ -623,7 +683,7 @@ class kDistOptBand:
         for trial in self.trialNC:
             outFile = trial.replace('coefficients', 'fluxes')
             self.fluxInputs.append(
-                {'inK': trial, 'outFlux': outFile,
+                {'inK': trial, 
                 'atmSpecFile': self.profiles, 'exe': self.exe,
                 'cwd': self.topDir, 'fluxDir': self.workDir})
         # end trial loop

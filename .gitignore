@@ -7,3 +7,7 @@ obsolete/
 rrtmgp_garand_atmos
 k-distribution-opt
 rte-rrtmgp
+garand_atmos/*.o*
+garand_atmos/*.mod
+__pycache__
+full_band_flux
