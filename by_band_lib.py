@@ -53,8 +53,8 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
     # for minor contributors
     alts = ['lower', 'upper']
     absIntDims = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
-    contribDims = ['contributors_{}'.format(alt) for alt in alts]
     limDims = ['minor_limits_gpt_{}'.format(alt) for alt in alts]
+    contribDims = ['contributors_{}'.format(alt) for alt in alts]
     contribVars = ['kminor_{}'.format(alt) for alt in alts]
     startVars = ['kminor_start_{}'.format(alt) for alt in alts]
 
@@ -175,7 +175,7 @@ def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
                 # endif iKeep
 
                 # for a given band, g-point indices are just 1-16
-                outDS[startVar] = xa.ones_like(startDS)
+                #outDS[startVar] = xa.ones_like(startDS)
                 outDS[contribVar] = xa.DataArray(contribDS)
             # end zipMinor loop
 
@@ -509,7 +509,7 @@ class kDistOptBand:
 
         # the trialNC that optimizes cost function for given comb iter
         # starts off as input file
-        #self.optNC = str(self.inNC)
+        self.optNC = str(self.inNC)
 
         # the number of g-points in a given comb iter
         self.nGpt = 16
