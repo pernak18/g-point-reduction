@@ -284,44 +284,6 @@ def normCost(tst_file, ref_file, norm,
     return [np.sqrt((c/n).mean()) for (c, n) in zip(tst_cost, norm)]
 # end normCost
 
-def recordDimRename(inNC, outNC):
-    """
-    Rename "record" dimension in given netCDF file
-    """
-
-    outDS = xa.Dataset()
-
-    with xa.open_dataset(inNC) as inObj:
-        # save global attributes for later -- will stuff into buffer, unedited
-        globalAtt = inObj.attrs
-
-        # write buffer netCDF, complete with global attributes
-        ncVars = list(inObj.keys())
-
-        for ncVar in ncVars:
-            ncDat = inObj[ncVar]
-
-            if 'record' in ncDat.dims:
-                # which dimension corresponds to `record`?
-                dims = list(ncDat.dims)
-                iRec = dims.index('record')
-                dims[iRec] = 'forcing'
-
-                # save variable with new dimensions
-                outDS[ncVar] = xa.DataArray(ncDat, dims=dims)
-            else:
-                # retain any variables without a record dimension
-                outDS[ncVar] = xa.DataArray(ncDat)
-            # endif record
-        # end ncVar loop
-    # endwith
-
-    # stuff the global attributes into the new dataset
-    for att in globalAtt: outDS.attrs[att] = globalAtt[att]
-    outDS.to_netcdf(outNC, mode='w')
-    print('Completed {}'.format(outNC))
-# end recordDimRename()
-
 def fluxCompute(inK, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
                 fluxDir='flux_calculations'):
     """
@@ -419,50 +381,19 @@ def fluxCombine(fluxFiles, concatDim='band',
     #fluxNet = combinedDS[]
 # end fluxCombine()
 
-def exeTest(kFileNC, startDir=CWD):
-    """
-    Obsolete test of Robert's by-band flux calculation executable
-    """
-
-    # divide full k-distribution into subsets for each band
-    print('Band splitting commenced')
-    kFiles = kDistBandSplit(kFileNC)
-    print('Band splitting completed')
-
-    testDir = 'exe_test'
-    BYBAND.pathCheck(testDir, mkdir=True)
-
-    os.chdir(testDir)
-
-    # so we don't overwrite the LBL results
-    inRRTMGP = 'rrtmgp-inputs-outputs.nc'
-    shutil.copyfile(GARAND, inRRTMGP)
-
-    # only doing one band for now
-    for kFile in kFiles:
-        base = os.path.basename(kFile)
-        kAbsPath = '{}/{}'.format(topDir, kFile)
-        if os.path.islink(base): os.unlink(base)
-        os.symlink(kAbsPath, base)
-
-        #sub.call([EXE, inRRTMGP, base])
-        break
-    # end kFile loop
-
-    os.chdir(startDir)
-# end exeTest()
-
-def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles):
+def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles, cleanup=False):
     """
     needs a lot of work -- just spitballin
+
+    single-band optimization, to be combined with broadband fluxes 
+    from other bands before cost function optimization 
     """
 
-    iComb = 1
+    iterBand = 1
     while True:
-        print(kBandFile)
-
+        print('Starting Band {}, iteration {}'.format(band, iterBand))
         # start with `kFile` with no g-point combinations for a given band
-        kObj = kDistOptBand(kBandFile, band, DOLW, IFORCING, iComb)
+        kObj = kDistOptBand(kBandFile, band, doLW, iForce, iterBand)
 
         # combine g-points in band and generate corresponding netCDF
         kObj.gPointCombine()
@@ -473,6 +404,13 @@ def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles):
         # run RRTMGP on all files self.trialNC (each g-point combination)
         # generate input dictionaries for fluxComputePool()
         kObj.configParallel()
+
+        # replace `kFile` with netCDF that corresponds to g-point combination
+        # that minimizes the cost function
+        kBandFile = kObj.trialNC[0]
+
+        # next iteration
+        iterBand += 1
         continue
 
         # calculate fluxes corresponding to every g-point combination
@@ -486,9 +424,7 @@ def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles):
         fluxesMod.insert(iBand, outFile)
 
         # combine fluxes from modified band with unmodified bands
-        #BYBAND.fluxCombine(kFilesMod)
-
-        #kObj.runBandRRTMGP()
+        #fluxCombine(kFilesMod)
 
         # determine optimal combination
         kObj.findOptimal(kObj.iCombine)
@@ -502,11 +438,11 @@ def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles):
         kBandFile = kObj.optNC
 
         # next iteration
-        iComb += 1
+        iterBand += 1
     # end while
 
     # cleanup
-    shutil.rmtree(kObj.workDir)
+    if cleanup: shutil.rmtree(kObj.workDir)
 # end bandOptimize
 
 class kDistOptBand:
@@ -537,7 +473,7 @@ class kDistOptBand:
         """
 
         # see constructor doc
-        print(inFile)
+        #print(inFile)
         paths = [inFile, profilesNC, topDir, exeRRTMGP]
         for path in paths: pathCheck(path)
 
@@ -602,7 +538,7 @@ class kDistOptBand:
         Combine g-points in a given band with adjacent g-point and
         store into a netCDF for further processing
 
-        TOcDO: will probably have to modify other variables in
+        TODO: will probably have to modify other variables in
         self.inNC like Ben does in combine_gpoints_fn.py
         """
 
@@ -618,14 +554,14 @@ class kDistOptBand:
             wCombine = [weights[np.array(gc)] for gc in gCombine]
 
             for gc, wc in zip(gCombine, wCombine):
+                g1, g2 = gc
+                w1, w2 = wc
+
                 # loop over each g-point combination and create
                 # a k-distribution netCDF for each
                 outNC='{}/coefficients_{}_g{:02d}-{:02d}_iter{:02d}.nc'.format(
-                    self.workDir, self.domainStr, gc[0], gc[1], self.iCombine)
+                    self.workDir, self.domainStr, gc+1, gc+1, self.iCombine)
                 self.trialNC.append(outNC)
-
-                g1, g2 = gc
-                w1, w2 = wc
 
                 outDS = xa.Dataset()
 
@@ -635,7 +571,7 @@ class kDistOptBand:
                 # will have its `g_combine` attribute perpetuated
                 # append g-point combinations metadata for given
                 # band and iteration in given band
-                outDS.attrs['g_combine'] = '{}+{}'.format(g1, g2)
+                outDS.attrs['g_combine'] = '{}+{}'.format(g1+1, g2+1)
 
                 for ncVar in ncVars:
                     ncDat = kDS[ncVar]
@@ -681,11 +617,18 @@ class kDistOptBand:
         """
 
         for trial in self.trialNC:
+            # using the file naming convention defined in 
+            # gCombine() -- coefficients_??_g??-??_iter??.nc
             outFile = trial.replace('coefficients', 'fluxes')
+            base = os.path.basename(trial)
+
+            # extract "g??-??_iter??" and make a directory for it
+            gCombineStr = '-'.join(base.split('_')[2:4])[:-3]
+            fluxDir = '{}/{}'.format(self.workDir, gCombineStr)
             self.fluxInputs.append(
                 {'inK': trial, 
                 'atmSpecFile': self.profiles, 'exe': self.exe,
-                'cwd': self.topDir, 'fluxDir': self.workDir})
+                'cwd': self.topDir, 'fluxDir': fluxDir})
         # end trial loop
     # end configParallel()
 
