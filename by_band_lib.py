@@ -21,6 +21,14 @@ CWD = os.getcwd()
 # user must do `pip install xarray` on cori (or other NERSC machines)
 import xarray as xa
 
+# full k distribution weights for each g-point (same for every band)
+WEIGHTS = [
+    0.1527534276, 0.1491729617, 0.1420961469, 0.1316886544,
+    0.1181945205, 0.1019300893, 0.0832767040, 0.0626720116,
+    0.0424925000, 0.0046269894, 0.0038279891, 0.0030260086,
+    0.0022199750, 0.0014140010, 0.0005330000, 0.0000750000
+]
+
 def pathCheck(path, mkdir=False):
     """
     Determine if file exists. If not, throw an Assertion Exception
@@ -33,175 +41,6 @@ def pathCheck(path, mkdir=False):
         assert os.path.exists(path), 'Could not find {}'.format(path)
     # endif mkdir
 # end pathCheck
-
-def kDistBandSplit(kFileNC, outDir='band_k_dist', domain='lw'):
-    """
-    Split a full k-distribution into separate files for each band
-
-    Input
-        kFileNC -- string, netCDF with full absorption coefficient 
-            distribution
-    Output
-        bandFiles -- list of strings, full paths to k-distribution 
-            files for each band
-    Keywords
-        outDir -- string, relative path to directory where all 
-            bandFiles are written
-        domain -- string, longwave (lw) or shortwave (sw)
-    """
-
-    pathCheck(outDir, mkdir=True)
-
-    weights = [
-        0.1527534276, 0.1491729617, 0.1420961469, 0.1316886544,
-        0.1181945205, 0.1019300893, 0.0832767040, 0.0626720116,
-        0.0424925000, 0.0046269894, 0.0038279891, 0.0030260086,
-        0.0022199750, 0.0014140010, 0.0005330000, 0.0000750000
-    ]
-    xaWeights = xa.DataArray(
-        weights, dims={'gpt': range(len(weights))}, name='gpt_weights')
-
-    # for minor contributors
-    alts = ['lower', 'upper']
-    absIntDims = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
-    limDims = ['minor_limits_gpt_{}'.format(alt) for alt in alts]
-    contribDims = ['contributors_{}'.format(alt) for alt in alts]
-    contribVars = ['kminor_{}'.format(alt) for alt in alts]
-    startVars = ['kminor_start_{}'.format(alt) for alt in alts]
-
-    bandFiles = []
-    with xa.open_dataset(kFileNC) as kAllDS:
-        gLims = kAllDS.bnd_limits_gpt.values
-        ncVars = list(kAllDS.keys())
-
-        # for minor absorbers, determine bands for contributions
-        # based on initial, full-band k-distribution (i.e.,
-        # before combining g-points)
-        minorLims, iKeepAll = {}, {}
-        for absIntDim, lim in zip(absIntDims, limDims):
-            minorLims[absIntDim] = kAllDS[lim].values
-
-        for iBand in kAllDS.bnd.values:
-            # make a separate netCDF for each band
-            outNC = '{}/{}/coefficients_{}_band{:02d}.nc'.format(
-                os.getcwd(), outDir, domain, iBand+1)
-
-            # Dataset that will be written to netCDF with new variables and
-            # unedited global attribues
-            outDS = xa.Dataset()
-
-            # determine which variables need to be parsed
-            for ncVar in ncVars:
-                ncDat = kAllDS[ncVar]
-                varDims = kAllDS[ncVar].dims
-
-                if 'gpt' in varDims:
-                    # grab only the g-point information for this band
-                    # and convert to zero-offset
-                    i1, i2 = gLims[iBand]-1
-                    ncDat = ncDat.isel(gpt=slice(i1, i2+1))
-                elif 'bnd' in varDims:
-                    # list [iBand] to preserve `bnd` dim
-                    # https://stackoverflow.com/a/52191682
-                    ncDat = ncDat.isel(bnd=[iBand])
-                # endif
-
-                # have to process contributors vars *after* absorber intervals
-                if contribDims[0] in varDims: continue
-                if contribDims[1] in varDims: continue
-
-                for absIntDim in absIntDims:
-                    if absIntDim in varDims:
-                        # https://stackoverflow.com/a/25823710
-                        # possibly less efficient, but more readable way to
-                        # get index of band whose g-point limits match the
-                        # limits from the contributor; not robust -- assumes
-                        # contributions only happen in a single band
-                        # limits for contributors must match BOTH band limits
-                        iKeep = np.where(
-                            (minorLims[absIntDim] == gLims[iBand]).all(
-                            axis=1))[0]
-                        iKeepAll[absIntDim] = np.array(iKeep)
-
-                        if iKeep.size == 0:
-                            # TO DO: also not robust -- make it more so;
-                            # it assumes this conditional is met with only
-                            # arrays of dimension minor x string_len (= 32) or
-                            # minor x 2
-                            # can't have 0-len dimension, so make dummy data
-                            if 'pair' in varDims:
-                                ncDat = xa.DataArray(np.zeros((1, 2)), 
-                                    dims=(absIntDim, 'pair'))
-                            else:
-                                ncDat = ncDat.isel({absIntDim: 0})
-                            # endif varDims
-                        else:
-                            ncDat = ncDat.isel({absIntDim: iKeep})
-                        # endif iKeep
-                    # endif absIntDim
-                # end absIntDim loop
-
-                # define "local" g-point limits for given band rather than
-                # using limits from entire k-distribution
-                if 'limits_gpt' in ncVar: ncDat[:] = [1, len(weights)]
-
-                # write variable to output dataset
-                outDS[ncVar] = xa.DataArray(ncDat)
-            # end ncVar loop
-
-            # now process upper and lower contributors
-            # this is where things get WACKY
-            zipMinor = zip(absIntDims, contribDims, contribVars, startVars)
-            for absIntDim, contribDim, contribVar, startVar in zipMinor:
-                contribDS = kAllDS[contribVar]
-
-                # "You want kminor_lower[:,:,i:i+16]
-                # (i being 1-based here, using  i = minor_start_lower(j) )
-                # and the j are the intervals that fall in the band"
-                startDS = kAllDS[startVar]
-                iKeep = []
-                for j in iKeepAll[absIntDim]:
-                    iStart = int(startDS.isel({absIntDim: j}))
-                    iEnd = iStart + len(weights)
-                    iKeep.append(np.arange(iStart, iEnd).astype(int)-1)
-                # end j loop
-
-                # need a vector to use with array indexing
-                iKeep = np.array(iKeep).flatten()
-
-                if iKeep.size == 0:
-                    # TO DO: also not robust -- make it more so;
-                    varShape = contribDS.shape
-                    # can't actually have a zero-len dimension, so
-                    # we will make fake data
-                    newDim = 1
-                    newShape = (varShape[0], varShape[1], newDim)
-
-                    contribDS = xa.DataArray(
-                        np.zeros(newShape), dims=contribDS.dims)
-                    startDS = xa.DataArray(np.zeros((1)), dims=absIntDim)
-                else:
-                    startDS = startDS.isel({absIntDim: iKeepAll[absIntDim]})
-                    contribDS = contribDS.isel({contribDim: iKeep})
-                # endif iKeep
-
-                # kminor_start_* needs to refer to local bands now, and 
-                # needs to be unit-offset
-                outDS[startVar] = startDS-startDS[0]+1
-                outDS[contribVar] = xa.DataArray(contribDS)
-            # end zipMinor loop
-
-            # write weights to output file
-            outDS['gpt_weights'] = xaWeights
-
-            outDS.to_netcdf(outNC, mode='w')
-            #print('Completed {}'.format(outNC))
-            bandFiles.append(outNC)
-        # end band loop
-    # endwith
-
-    return bandFiles
-# end kDistBandSplit()
 
 def costFuncComp(tst_file, ref_file, levs=[0, 10000, 102000], iRecord=0,
                  ncVars=['net_flux', 'heating_rate', 'band_flux_net']):
@@ -283,64 +122,6 @@ def normCost(tst_file, ref_file, norm,
     #   the squared error
     return [np.sqrt((c/n).mean()) for (c, n) in zip(tst_cost, norm)]
 # end normCost
-
-def fluxCompute(inK, atmSpecFile=GARAND, exe=EXE, cwd=CWD,
-                fluxDir='flux_calculations'):
-    """
-    Compute fluxes for a given k-distribution and set of atmospheric
-    conditions
-
-    Input
-        inK -- string, absolute path to netCDF with k-distribution
-
-    Keywords
-        atmSpecFile -- string, absolute path to netCDF with
-            atmospheric profiles
-        exe -- string, absolute path to RRTMGP driver executable
-        cwd -- string, absolute path to current working directory
-        fluxDir -- string, path to directory where fluxes will be calculated
-
-    Output
-        Fluxes written to outFile
-    """
-
-    base = os.path.basename(inK)
-    base = base.replace('coefficients', 'flux')
-    outFile = '{}/{}'.format(fluxDir, base)
-
-    curDir = os.getcwd()
-    #print('Computing flux for {}'.format(inK))
-
-    pathCheck(fluxDir, mkdir=True)
-    os.chdir(fluxDir)
-
-    # file staging for RRTMGP run
-    # trying to keep this simple/compact so we don't end up with a
-    # bunch of files in a directory
-    aPaths = [exe, inK]
-    rPaths = ['./run_rrtmgp', 'coefficients.nc']
-    for aPath, rPath in zip(aPaths, rPaths):
-        if os.path.islink(rPath): os.unlink(rPath)
-        os.symlink(aPath, rPath)
-    # end rPath loop
-
-    # so we don't overwrite the LBL results
-    inRRTMGP = 'rrtmgp-inputs-outputs.nc'
-    shutil.copyfile(atmSpecFile, inRRTMGP)
-
-    # assuming the RRTMGP call sequence is `exe inputs k-dist`
-    rPaths.insert(1, inRRTMGP)
-
-    # run the model with inputs
-    sub.call(rPaths)
-
-    # save outputs (inRRTMGP gets overwritten every run)
-    os.rename(inRRTMGP, '{}/{}'.format(curDir, outFile))
-    print('Wrote {}'.format(outFile))
-
-    os.chdir(curDir)
-
-# end fluxCompute()
 
 def fluxComputePool(inDict):
     """
@@ -436,6 +217,8 @@ def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles, cleanup=False):
         # replace `kFile` with netCDF that corresponds to g-point combination
         # that minimizes the cost function
         kBandFile = kObj.optNC
+        
+        # REASSIGN self.kBandNC and self.optNC!
 
         # next iteration
         iterBand += 1
@@ -447,7 +230,9 @@ def bandOptimize(kBandFile, band, doLW, iForce, fluxFiles, cleanup=False):
 
 class kDistOptBand:
     def __init__(self, inFile, band, lw, idxForce, iCombine,
-                profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE):
+                profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE, 
+                fullBandKDir='band_k_dist', 
+                fullBandFluxDir='flux_calculations'):
         """
         - For a given band, loop over possible g-point combinations within
             each band, creating k-distribution and band-wise flux files for
@@ -458,7 +243,8 @@ class kDistOptBand:
             optimal combination of g-points
 
         Input
-            inFile -- string, netCF created with kDistBandSplit() method
+            inFile -- string, netCDF with full k-distribution
+                the starting point
             band -- int, band number that is being processed with object
             lw -- boolean, do longwave domain (otherwise shortwave)
             idxForce -- int, index of forcing scenario
@@ -470,6 +256,10 @@ class kDistOptBand:
             topDir -- string, path to top level of git repository clone
             exeRRTMGP -- string, path to RRTMGP executable that is run
                 in flux calculations
+            fullBandKDir -- string, path to directory with single-band 
+                k-distribution netCDF files
+            fullBandFluxDir -- string, path to directory with single-band 
+                flux RRTMGP netCDF files
         """
 
         # see constructor doc
@@ -479,6 +269,7 @@ class kDistOptBand:
 
         self.inNC = str(inFile)
         self.iBand = int(band)
+        self.band = self.iBand+1
         self.doLW = bool(lw)
         self.domainStr = 'LW' if lw else 'SW'
         self.iForce = int(idxForce)
@@ -486,13 +277,17 @@ class kDistOptBand:
         self.profiles = str(profilesNC)
         self.topDir = str(topDir)
         self.exe = str(exeRRTMGP)
+        self.fullBandKDir = str(fullBandKDir)
+        self.fullBandFluxDir = str(fullBandFluxDir)
+        self.initWeights = list(WEIGHTS)
+        self.nWeights0 = len(self.initWeights)
 
         # directory where model will be run for each g-point
         # combination
-        self.workDir = '{}/workdir_band_{}'.format(self.topDir, self.iBand)
+        self.workDir = '{}/workdir_band_{}'.format(self.topDir, self.band)
 
         # directory to store optimal netCDFs for each iteration and band
-        self.optDir = '{}/band_{}_opt'.format(self.topDir, self.iBand)
+        self.optDir = '{}/band_{}_opt'.format(self.topDir, self.band)
 
         paths = [self.workDir, self.optDir]
         for path in paths: pathCheck(path, mkdir=True)
@@ -514,6 +309,15 @@ class kDistOptBand:
 
         # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN CLASS
 
+        # netCDF with the band k-distribution (to which kDistBand 
+        # writes its output if it is band splitting); corresponding flux
+        # start off as full band parameters, then are overwritten with
+        # files that combine g-points 
+        self.kBandNC = '{}/{}/coefficients_{}_band{:02d}.nc'.format(
+            self.topDir, self.fullBandKDir, self.domainStr, self.band)
+        self.fluxBandNC = '{}/{}/flux_{}_band{:02d}.nc'.format(
+            self.topDir, self.fullBandFluxDir, self.domainStr, self.band)
+
         # list of netCDFs for each g-point combination in a given band
         # and combination iteration
         self.trialNC = []
@@ -528,10 +332,208 @@ class kDistOptBand:
         # list of dictionaries used for fluxComputePool() input
         self.fluxInputs = []
 
+        # weights after a given combination iteration; start off with 
+        # full set of weights
+        self.iterWeights = list(WEIGHTS)
+        self.nWeights = len(self.iterWeights)
+
         # original g-point IDs for a given band
         # TO DO: have not started trying to preserve these guys
         self.gOrigID = range(1, self.nGpt+1)
     # end constructor
+
+    def kDistBand(self, combine=False):
+        """
+        Split a full k-distribution into separate files for a given band 
+        (default) or combine g-points in a given band and generate 
+        corresponding netCDF
+
+        Keywords
+            combine -- boolean, specifies whether g-points are being 
+                combined; default is False and full k-distribution is 
+                split into bands with an equal number of g-points in 
+                each band
+        """
+
+        weightsDA = xa.DataArray(self.iterWeights, 
+            dims={'gpt': range(self.nWeights)}, name='gpt_weights')
+
+        # for minor contributors
+        alts = ['lower', 'upper']
+        absIntDims = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
+        limDims = ['minor_limits_gpt_{}'.format(alt) for alt in alts]
+        contribDims = ['contributors_{}'.format(alt) for alt in alts]
+        contribVars = ['kminor_{}'.format(alt) for alt in alts]
+        startVars = ['kminor_start_{}'.format(alt) for alt in alts]
+
+        with xa.open_dataset(self.inNC) as kAllDS:
+            gLims = kAllDS.bnd_limits_gpt.values
+            ncVars = list(kAllDS.keys())
+
+            # for minor absorbers, determine bands for contributions
+            # based on initial, full-band k-distribution (i.e.,
+            # before combining g-points)
+            minorLims, iKeepAll = {}, {}
+            for absIntDim, lim in zip(absIntDims, limDims):
+                minorLims[absIntDim] = kAllDS[lim].values
+
+            # Dataset that will be written to netCDF with new variables and
+            # unedited global attribues
+            outDS = xa.Dataset()
+
+            # determine which variables need to be parsed
+            for ncVar in ncVars:
+                ncDat = kAllDS[ncVar]
+                varDims = kAllDS[ncVar].dims
+
+                if 'gpt' in varDims:
+                    # grab only the g-point information for this band
+                    # and convert to zero-offset
+                    i1, i2 = gLims[self.iBand]-1
+                    ncDat = ncDat.isel(gpt=slice(i1, i2+1))
+                elif 'bnd' in varDims:
+                    # list [iBand] to preserve `bnd` dim
+                    # https://stackoverflow.com/a/52191682
+                    ncDat = ncDat.isel(bnd=[self.iBand])
+                # endif
+
+                # have to process contributors vars *after* absorber intervals
+                if contribDims[0] in varDims: continue
+                if contribDims[1] in varDims: continue
+
+                for absIntDim in absIntDims:
+                    if absIntDim in varDims:
+                        # https://stackoverflow.com/a/25823710
+                        # possibly less efficient, but more readable way to
+                        # get index of band whose g-point limits match the
+                        # limits from the contributor; not robust -- assumes
+                        # contributions only happen in a single band
+                        # limits for contributors must match BOTH band limits
+                        iKeep = np.where(
+                            (minorLims[absIntDim] == gLims[self.iBand]).all(
+                            axis=1))[0]
+                        iKeepAll[absIntDim] = np.array(iKeep)
+
+                        if iKeep.size == 0:
+                            # TO DO: also not robust -- make it more so;
+                            # it assumes this conditional is met with only
+                            # arrays of dimension minor x string_len (= 32) or
+                            # minor x 2
+                            # can't have 0-len dimension, so make dummy data
+                            if 'pair' in varDims:
+                                ncDat = xa.DataArray(np.zeros((1, 2)), 
+                                    dims=(absIntDim, 'pair'))
+                            else:
+                                ncDat = ncDat.isel({absIntDim: 0})
+                            # endif varDims
+                        else:
+                            ncDat = ncDat.isel({absIntDim: iKeep})
+                        # endif iKeep
+                    # endif absIntDim
+                # end absIntDim loop
+
+                # define "local" g-point limits for given band rather than
+                # using limits from entire k-distribution
+                if 'limits_gpt' in ncVar: ncDat[:] = [1, self.nWeights]
+
+                # write variable to output dataset
+                outDS[ncVar] = xa.DataArray(ncDat)
+            # end ncVar loop
+
+            # now process upper and lower contributors
+            # this is where things get WACKY
+            zipMinor = zip(absIntDims, contribDims, contribVars, startVars)
+            for absIntDim, contribDim, contribVar, startVar in zipMinor:
+                contribDS = kAllDS[contribVar]
+
+                # "You want kminor_lower[:,:,i:i+16]
+                # (i being 1-based here, using  i = minor_start_lower(j) )
+                # and the j are the intervals that fall in the band"
+                startDS = kAllDS[startVar]
+                iKeep = []
+                for j in iKeepAll[absIntDim]:
+                    iStart = int(startDS.isel({absIntDim: j}))
+                    iEnd = iStart + self.nWeights
+                    iKeep.append(np.arange(iStart, iEnd).astype(int)-1)
+                # end j loop
+
+                # need a vector to use with array indexing
+                iKeep = np.array(iKeep).flatten()
+
+                if iKeep.size == 0:
+                    # TO DO: also not robust -- make it more so;
+                    varShape = contribDS.shape
+                    # can't actually have a zero-len dimension, so
+                    # we will make fake data
+                    newDim = 1
+                    newShape = (varShape[0], varShape[1], newDim)
+
+                    contribDS = xa.DataArray(
+                        np.zeros(newShape), dims=contribDS.dims)
+                    startDS = xa.DataArray(np.zeros((1)), dims=absIntDim)
+                else:
+                    startDS = startDS.isel({absIntDim: iKeepAll[absIntDim]})
+                    contribDS = contribDS.isel({contribDim: iKeep})
+                # endif iKeep
+
+                # kminor_start_* needs to refer to local bands now, and 
+                # needs to be unit-offset
+                outDS[startVar] = startDS-startDS[0]+1
+                outDS[contribVar] = xa.DataArray(contribDS)
+            # end zipMinor loop
+
+            # write weights to output file
+            outDS['gpt_weights'] = weightsDA
+
+            outDS.to_netcdf(self.kBandNC, mode='w')
+            #print('Completed {}'.format(outNC))
+        # endwith
+    # end kDistBand()
+
+    def fluxCompute(self, combine=False):
+        """
+        Compute fluxes for a given k-distribution and set of atmospheric
+        conditions
+
+        Keywords
+            combine -- boolean, specifies whether g-points are being 
+                combined; default is False and full k-distribution is 
+                split into bands with an equal number of g-points in 
+                each band
+        """
+
+        #print('Computing flux for {}'.format(inK))
+
+        fluxDir = self.workDir if combine else self.fullBandFluxDir
+        pathCheck(fluxDir, mkdir=True)
+        os.chdir(fluxDir)
+
+        # file staging for RRTMGP run
+        # trying to keep this simple/compact so we don't end up with a
+        # bunch of files in a directory
+        aPaths = [self.exe, self.kBandNC]
+        rPaths = ['./run_rrtmgp', 'coefficients.nc']
+        for aPath, rPath in zip(aPaths, rPaths):
+            if os.path.islink(rPath): os.unlink(rPath)
+            os.symlink(aPath, rPath)
+        # end rPath loop
+
+        # so we don't overwrite the LBL results
+        inRRTMGP = 'rrtmgp-inputs-outputs.nc'
+        shutil.copyfile(self.profiles, inRRTMGP)
+
+        # assuming the RRTMGP call sequence is `exe inputs k-dist`
+        rPaths.insert(1, inRRTMGP)
+
+        # run the model with inputs
+        sub.call(rPaths)
+
+        # save outputs (inRRTMGP gets overwritten every run)
+        os.rename(inRRTMGP, self.fluxBandNC)
+        print('Wrote {}'.format(self.fluxBandNC))
+
+        os.chdir(self.topDir)
+    # end fluxCompute()
 
     def gPointCombine(self):
         """
