@@ -11,3 +11,6 @@ garand_atmos/*.o*
 garand_atmos/*.mod
 __pycache__
 full_band_flux
+band_k_dist
+workdir_*
+band_*_opt

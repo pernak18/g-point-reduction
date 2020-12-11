@@ -15,7 +15,7 @@ PROJECT = '/global/project/projectdirs/e3sm/pernak18/'
 EXE = '{}/g-point-reduction/garand_atmos/rrtmgp_garand_atmos'.format(
     PROJECT)
 GARAND = '{}/reference_netCDF/g-point-reduce/'.format(PROJECT) + \
-  'multi_garand_template.nc'
+  'multi_garand_template_single_band.nc'
 CWD = os.getcwd()
 
 # user must do `pip install xarray` on cori (or other NERSC machines)
@@ -282,11 +282,16 @@ class kDistOptBand:
         self.fluxBandNC = '{}/{}/flux_{}_band{:02d}.nc'.format(
             self.topDir, self.fullBandFluxDir, self.domainStr, self.band)
 
-        self.iterDir = None
-
+        # string identifiers for what g-points are combined at each trial
+        self.gCombStr = []
+        
         # list of netCDFs for each g-point combination in a given band
         # and combination iteration
         self.trialNC = []
+        
+        # list of xarray datasets that combines g-point combination 
+        # arrays (self.iBand) with full-band arrays (!= self.iBand)
+        self.trialDS = []
 
         # the trialNC that optimizes cost function for given comb iter
         # starts off as input file
@@ -456,7 +461,7 @@ class kDistOptBand:
         # endwith
     # end kDistBand()
 
-    def fluxCompute(self, inK, combine=False):
+    def fluxCompute(self, inK, combine=False, suffix=None):
         """
         Compute fluxes for a given k-distribution and set of atmospheric
         conditions
@@ -469,17 +474,16 @@ class kDistOptBand:
                 combined; default is False and full k-distribution is 
                 split into bands with an equal number of g-points in 
                 each band
+            suffix -- string, g-point combination and iteration identifier
         """
 
         #print('Computing flux for {}'.format(inK))
 
         if combine:
             # extract "g??-??_iter??" and make a directory for it
-            base = os.path.basename(inK)
-            gCombineStr = '-'.join(base.split('_')[2:4])[:-3]
-            fluxDir = '{}/{}'.format(self.workDir, gCombineStr)
-            outFile = '{}/{}'.format(
-                fluxDir, base.replace('coefficients', 'flux'))
+            fluxDir = '{}/{}'.format(self.workDir, suffix)
+            outFile = '{}/{}'.format(fluxDir, 
+                os.path.basename(inK).replace('coefficients', 'flux'))
         else:
             fluxDir = str(self.fullBandFluxDir)
             outFile = str(self.fluxBandNC)
@@ -541,9 +545,12 @@ class kDistOptBand:
 
                 # loop over each g-point combination and create
                 # a k-distribution netCDF for each
-                outNC='{}/coefficients_{}_g{:02d}-{:02d}_iter{:02d}.nc'.format(
-                    self.workDir, self.domainStr, g1+1, g2+1, self.iCombine)
+                gCombStr = 'g{:02d}-{:02d}_iter{:02d}'.format(
+                    g1+1, g2+1, self.iCombine)
+                outNC='{}/coefficients_{}_{}.nc'.format(
+                    self.workDir, self.domainStr, gCombStr)
                 self.trialNC.append(outNC)
+                self.gCombStr.append(gCombStr)
 
                 outDS = xa.Dataset()
 
@@ -592,6 +599,7 @@ class kDistOptBand:
                 outDS.to_netcdf(outNC, 'w')
             # end combination loop
         # endwith kDS
+        self.nGpt -= 1
     # end gPointCombine()
 
     def configParallel(self):
@@ -600,13 +608,9 @@ class kDistOptBand:
         outside of class
         """
 
-        for trial in self.trialNC:
-            # using the file naming convention defined in 
-            # gCombine() -- coefficients_??_g??-??_iter??.nc
-            outFile = trial.replace('coefficients', 'fluxes')
-            base = os.path.basename(trial)
-
-            self.fluxInputs.append({'inK': trial, 'combine': True})
+        for trial, combination in zip(self.trialNC, self.gCombStr):
+            self.fluxInputs.append(
+                {'inK': trial, 'combine': True, 'comb_iter': combination})
         # end trial loop
     # end configParallel()
 
@@ -617,7 +621,8 @@ class kDistOptBand:
 
         # by the time we're multithreading, we are in the 
         # g-point combining process
-        self.fluxCompute(inDict['inK'], combine=True)
+        self.fluxCompute(
+            inDict['inK'], combine=True, suffix=inDict['comb_iter'])
     # end fluxComputePool()
 
     def fluxCombine(self):
@@ -635,37 +640,76 @@ class kDistOptBand:
 
         import glob
 
+        bandVars = ['flux_up', 'flux_dn', 'flux_net', 'emis_sfc', 'band_lims_wvn']
+
         # flux files for this band and g-point combination iteration
         # all possible g-point combinations
         # should only be n-combination files
-        bandTrials = sorted(glob.glob('{}/g??-??-iter{:02d}/flux_*.nc'.format(
+        bandTrials = sorted(glob.glob('{}/g??-??_iter{:02d}/flux_*.nc'.format(
             self.workDir, self.iCombine)))
 
-        # replace original fluxes for band with modified one
-        # should only be nbands files
-        fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
+        # full-band flux file fetch; should only be nbands files
+        fullNC = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
             self.fullBandFluxDir, self.domainStr)))
+        nBands = len(fullNC)
+        fullDS = []
+        for bandNC in fullNC:
+            with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
-        fluxVars = ['band_flux_up', 'band_flux_dn', 'band_flux_net']
-        allVars = xa.open_dataset(fullBandFluxes[0]).variables
-
-        # combine fluxes from modified band with unmodified bands
-        # list of xarray datasets: each dataset is a complete flux dataset  
-        # follows the RRTMGP netCDF convention
-        dsList = []
+        # trial = g-point combination
         for iTrial, trial in enumerate(bandTrials):
-            fluxesMod = list(fullBandFluxes)
-            fluxesMod.remove(fluxesMod[self.iBand])
-            fluxesMod.insert(self.iBand, trial)
-
             outDS = xa.Dataset()
 
-            for fluxVar in fluxVars:
-                fluxDS = [xa.open_dataset(fluxFile)[fluxVar] for fluxFile in fluxesMod]
-                outDS[fluxVar] = xa.concat(fluxDS, 'band')
-            # end fluxVar loop
-            outDS.to_netcdf('temp_band{:02d}.nc'.format(iTrial+1))
+            with xa.open_dataset(trial) as trialDS:
+                # replace original fluxes for band with modified one
+                fluxesMod = list(fullDS)
+                fluxesMod.remove(fluxesMod[self.iBand])
+                fluxesMod.insert(self.iBand, trialDS)
+
+                # consider xarray.merge()
+                ncVars = list(trialDS.keys())
+                for ncVar in ncVars:
+                    if ncVar in bandVars:
+                        # concat variables in the band dimension
+                        newFluxes = [bandDS[ncVar] for bandDS in fluxesMod]
+                        outDat = xa.concat(newFluxes, 'band')
+                    elif ncVar == 'band_lims_gpt':
+                        # this is a tough one
+                        wvnLimsMod = []
+                        gPerBand = 16
+                        g1 = 1
+                        for iBand, bandDS in enumerate(fluxesMod):
+                            if iBand == self.iBand:
+                                g2 = g1+self.nGpt-1
+                                wvnLimsMod.append([g1, g2])
+                                g1 = g2+1
+                                g2 = g1+gPerBand-1
+                            else:
+                                g2 = g1+gPerBand-1
+                                wvnLimsMod.append([g1, g2])
+                                g1 = g2+1
+                                g2 = g1+gPerBand-1
+                            # endif iBand
+                        # end band loop
+                        modDims = \
+                            {'band': np.arange(nBands), 'pair': np.arange(2)}
+                        outDat = xa.DataArray(wvnLimsMod, dims=modDims)
+                    else:
+                        # retain any variables with no band dimension
+                        outDat = trialDS[ncVar]
+                    # endif ncVar
+                    outDS[ncVar] = outDat
+                    outDS.to_netcdf('temp.nc')
+                # end ncVar loop
+
+                # calculate broadband fluxes
+
+                # calculate heating rates
+                
+                self.trialDS.append(outDS)
+            # endwith
         # end trial loop
+
     # end fluxCombine()
 
     def findOptimal(self, iCombine):
