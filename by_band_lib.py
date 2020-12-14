@@ -521,6 +521,7 @@ class kDistOptBand:
 
         import glob
 
+        # TO DO: want to save these in the object attributes
         # flux files for this band and g-point combination iteration
         # all possible g-point combinations
         # should only be n-combination files
@@ -532,10 +533,12 @@ class kDistOptBand:
             self.fullBandFluxDir, self.domainStr)))
         nBands = len(fullNC)
 
+        # open all of the netCDFs as xarray datasets for future processing
         fullDS = []
         for bandNC in fullNC:
             with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
+        # used for g-point reassignment (gPerBand not used with self.iBand)
         gPerBand = 16
         g1 = 1
         nForce = 7
@@ -584,14 +587,12 @@ class kDistOptBand:
                             if iBand == self.iBand:
                                 g2 = g1+self.nGpt-1
                                 gptLimsMod.append([g1, g2])
-                                g1 = g2+1
-                                g2 = g1+gPerBand-1
                             else:
                                 g2 = g1+gPerBand-1
                                 gptLimsMod.append([g1, g2])
-                                g1 = g2+1
-                                g2 = g1+gPerBand-1
                             # endif iBand
+                            g1 = g2+1
+                            g2 = g1+gPerBand-1
                         # end band loop
 
                         # add record/forcing dimension
@@ -632,7 +633,7 @@ class kDistOptBand:
         """
         Calculate flexible cost function where RRTMGP-LBLRTM RMS error for
         any number of allowed parameters (usually just flux or HR) over many
-        levels is computed. If self.normal is empty
+        levels is computed. If self.norm is empty
 
         Input
             testDS -- xarray Dataset with RRTMGP fluxes
