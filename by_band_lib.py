@@ -47,14 +47,11 @@ def pathCheck(path, mkdir=False):
     # endif mkdir
 # end pathCheck
 
-class kDistOptBand:
-    def __init__(self, kFile, fluxesLBL, fluxesRRTMGP, 
-                band, lw, idxForce, iCombine,
+class gCombine_kDist:
+    def __init__(self, kFile, band, lw, idxForce, iCombine,
                 profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE, 
                 fullBandKDir='band_k_dist', 
-                fullBandFluxDir='flux_calculations', cleanup=True, 
-                costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
-                costWeights=CFWGT):
+                fullBandFluxDir='flux_calculations', cleanup=True):
         """
         - For a given band, loop over possible g-point combinations within
             each band, creating k-distribution and band-wise flux files for
@@ -67,8 +64,6 @@ class kDistOptBand:
         Input
             kFile -- string, netCDF with full (iteration 0) or reduced 
                 k-distribution
-            fluxesLBL -- string, path to LBLRTM flux netCDF file
-            fluxesRRTMGP -- string, path to RRTMGP flux netCDF file
             band -- int, band number that is being processed with object
             lw -- boolean, do longwave domain (otherwise shortwave)
             idxForce -- int, index of forcing scenario
@@ -84,21 +79,14 @@ class kDistOptBand:
                 k-distribution netCDF files
             fullBandFluxDir -- string, path to directory with single-band 
                 flux RRTMGP netCDF files
-            costFuncComp -- list of strings; netCDF variable names of the 
-                arrays to include in the cost function
-            costFuncLevs -- list of floats; pressure levels in mbar to be 
-                used in the cost function
-            costWeights -- list of weights for each cost function component
         """
 
         # see constructor doc
         #print(kFile)
-        paths = [kFile, fluxesLBL, fluxesRRTMGP, profilesNC, topDir, exeRRTMGP]
+        paths = [kFile, profilesNC, topDir, exeRRTMGP]
         for path in paths: pathCheck(path)
 
         self.kInNC = str(kFile)
-        self.lblNC = str(fluxesLBL)
-        self.rrtmgpNC = str(fluxesRRTMGP)
         self.iBand = int(band)
         self.band = self.iBand+1
         self.doLW = bool(lw)
@@ -110,9 +98,6 @@ class kDistOptBand:
         self.exe = str(exeRRTMGP)
         self.fullBandKDir = str(fullBandKDir)
         self.fullBandFluxDir = str(fullBandFluxDir)
-        self.compNameCF = list(costFuncComp)
-        self.levCF = list(costFuncLevs)
-        self.costWeights = list(costWeights)
         self.initWeights = list(WEIGHTS)
         self.nWeights0 = len(self.initWeights)
 
@@ -141,11 +126,22 @@ class kDistOptBand:
                             'solar_source_sunspot', 'solar_source_quiet']
         # endif doLW
 
-        # xarray datasets for initial (full-k) RRTMGP and LBLRTM fluxes
-        self.rrtmgpDS = xa.open_dataset(self.rrtmgpNC)
-        self.lblDS = xa.open_dataset(self.lblNC)
+        # kminor variables that are nontrivial to combine
+        # for minor contributors
+        regions = ['lower', 'upper']
+        self.kMinor = ['kminor_{}'.format(reg) for reg in regions]
+        self.kMinorStart = ['kminor_start_{}'.format(reg) for reg in regions]
+        self.kMinorLims = \
+            ['minor_limits_gpt_{}'.format(reg) for reg in regions]
+        self.kMinorInt = \
+            ['minor_absorber_intervals_{}'.format(reg) for reg in regions]
+        self.kMinorContrib = ['contributors_{}'.format(reg) for reg in regions]
 
-        # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN CLASS
+        # xarray datasets for initial (full-k) RRTMGP and LBLRTM fluxes
+        #self.rrtmgpDS = xa.open_dataset(self.rrtmgpNC)
+        #self.lblDS = xa.open_dataset(self.lblNC)
+
+        # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN OBJECT
 
         # netCDF with the band k-distribution (to which kDistBand 
         # writes its output if it is band splitting); corresponding flux
@@ -211,12 +207,25 @@ class kDistOptBand:
             dims={'gpt': range(self.nWeights)}, name='gpt_weights')
 
         # for minor contributors
+        """
         alts = ['lower', 'upper']
         absIntDims = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
         limDims = ['minor_limits_gpt_{}'.format(alt) for alt in alts]
         contribDims = ['contributors_{}'.format(alt) for alt in alts]
         contribVars = ['kminor_{}'.format(alt) for alt in alts]
         startVars = ['kminor_start_{}'.format(alt) for alt in alts]
+        zipMinor = zip(absIntDims, contribDims, contribVars, startVars)
+        """
+
+        self.kMinor = ['kminor_{}'.format(reg) for reg in regions]
+        self.kMinorStart = ['kminor_start_{}'.format(reg) for alt in regions]
+        self.kMinorLims = \
+            ['minor_limits_gpt_{}'.format(reg) for alt in regions]
+        self.kMinorInt = \
+            ['minor_absorber_intervals_{}'.format(reg) in regions]
+        self.kMinorContrib = ['contributors_{}'.format(reg) for reg in regions]
+        zipMinor = zip(
+            self.kMinorInt, self.kMinorContrib, self.kMinor, self.kMinorStart)
 
         with xa.open_dataset(self.kInNC) as kAllDS:
             gLims = kAllDS.bnd_limits_gpt.values
@@ -294,7 +303,6 @@ class kDistOptBand:
 
             # now process upper and lower contributors
             # this is where things get WACKY
-            zipMinor = zip(absIntDims, contribDims, contribVars, startVars)
             for absIntDim, contribDim, contribVar, startVar in zipMinor:
                 contribDS = kAllDS[contribVar]
 
@@ -454,6 +462,8 @@ class kDistOptBand:
                             # g1 and g2
                             ncDat = xa.where(
                                 ncDat.gpt == g1, w1 + w2, ncDat)
+                        # define "local" g-point limits for given band rather than
+                        # using limits from entire k-distribution
                         else:
                             # replace g1' slice with weighted average of
                             # g1 and g2; TO DO: make sure this is how
@@ -468,6 +478,43 @@ class kDistOptBand:
                         # http://xarray.pydata.org/en/stable/generated/
                         # xarray.DataArray.where.html#xarray.DataArray.where
                         ncDat = ncDat.where(ncDat.gpt != g2, drop=True)
+                    elif ncVar in self.kMinorLims:
+                        ncDat[:] = [1, self.nGpt-1]
+                    elif ncVar in self.kMinorStart:
+                        # 1 less g-point, but first starting index is unchanged
+                        ncDat[1:] = ncDat[1:]-1
+                    elif ncVar in self.kMinor:
+                        # upper or lower atmosphere variable?
+                        iVar = self.kMinor.index(ncVar)
+
+                        # dimensions of this k-Minor variable
+                        print(outDS.sizes)
+                        sys.exit()
+                        ncDim = outDS.sizes[self.kMinorContrib[iVar]]
+
+                        # upper or lower contributors dimension?
+                        # not sure how to use this in the `where`, though
+                        contribDim = self.kMinorContrib[iVar]
+
+                        dCon = (self.nGpt-1) * np.arange(ncDim)
+                        con1 = g1 + dCon
+                        con2 = g2 + dCon
+                        #kg1 = ncDat.isel(contributors_lower=conLo1)
+                        #kg2 = ncDat.isel(contributors_lower=conLo2)
+                        kg1 = ncDat.isel({contribDim: con1})
+                        kg2 = ncDat.isel({contribDim: con2})
+ 
+                        if 'lower' in contribDim:
+                            ncDat = xa.where(ncDat.contributors_lower == con1,
+                                (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
+                        else:
+                            ncDat = xa.where(ncDat.contributors_upper == con1,
+                                (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
+                        # endif lower
+
+                        # unpack dimension tuple and use elements as args into 
+                        # numpy transpose method
+                        ncDat = ncDat.transpose(*varDims)
                     else:
                         # retain any variables without a gpt dimension
                         pass
@@ -481,7 +528,62 @@ class kDistOptBand:
             # end combination loop
         # endwith kDS
         self.nGpt -= 1
+        self.nWeights -= 1
     # end gPointCombine()
+# end gCombine_kDist
+
+class gCombine_Cost:        
+    def __init__(self, kFile, fluxesLBL, fluxesRRTMGP, 
+                band, lw, idxForce, iCombine,
+                profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE, 
+                fullBandKDir='band_k_dist', 
+                fullBandFluxDir='flux_calculations', cleanup=True, 
+                costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
+                costWeights=CFWGT):
+        """
+        flesh this out...
+
+        - For a given band, loop over possible g-point combinations within
+            each band, creating k-distribution and band-wise flux files for
+            each possible combination
+        - Run a RRTMGP executable that performs computations for a single band
+        - Compute broadband fluxes and heating rates
+        - Compute cost function from broadband parameters and determine
+            optimal combination of g-points
+
+        Input
+            kFile -- string, netCDF with full (iteration 0) or reduced 
+                k-distribution
+            fluxesLBL -- string, path to LBLRTM flux netCDF file
+            fluxesRRTMGP -- string, path to RRTMGP flux netCDF file
+            band -- int, band number that is being processed with object
+            lw -- boolean, do longwave domain (otherwise shortwave)
+            idxForce -- int, index of forcing scenario
+            iCombine -- int, index for what iteration of g-point combining is
+                underway
+
+        Keywords
+            profilesNC -- string, path to netCDF with atmospheric profiles
+            topDir -- string, path to top level of git repository clone
+            exeRRTMGP -- string, path to RRTMGP executable that is run
+                in flux calculations
+            fullBandKDir -- string, path to directory with single-band 
+                k-distribution netCDF files
+            fullBandFluxDir -- string, path to directory with single-band 
+                flux RRTMGP netCDF files
+            costFuncComp -- list of strings; netCDF variable names of the 
+                arrays to include in the cost function
+            costFuncLevs -- list of floats; pressure levels in mbar to be 
+                used in the cost function
+            costWeights -- list of weights for each cost function component
+        """
+
+        self.lblNC = str(fluxesLBL)
+        self.rrtmgpNC = str(fluxesRRTMGP)
+        self.compNameCF = list(costFuncComp)
+        self.levCF = list(costFuncLevs)
+        self.costWeights = list(costWeights)
+    # end constructor
 
     def configParallel(self):
         """
@@ -560,7 +662,7 @@ class kDistOptBand:
                 fluxesMod.remove(fluxesMod[self.iBand])
                 fluxesMod.insert(self.iBand, trialDS)
 
-                # consider xarray.merge()
+                # TO DO: consider xarray.merge()
                 ncVars = list(trialDS.keys())
                 for ncVar in ncVars:
                     if ncVar in bandVars:
@@ -659,13 +761,14 @@ class kDistOptBand:
             # forcing scenario
             cfVar = getattr(subsetErr, cfVar)
             costs.append(
-                (cfVar.isel(record=self.iForce)**2).mean(dim=('col', pStr)))
+                (cfVar.isel(record=self.iForce)**2).mean(
+                dim=('col', pStr)).values)
         # end ncVar loop
 
         if not self.norm: self.norm = list(costs)
 
         normCosts = \
-            [np.sqrt((c).mean()) for (c, n) in zip(costs, self.norm)]
+            [np.sqrt((c).mean())/n for (c, n) in zip(costs, self.norm)]
         totCost = np.sqrt(np.sum([w * c**2 for (w, c) in \
             zip(self.costWeights, normCosts)])/np.sum(self.costWeights))
         self.totalCost.append(totCost)
@@ -693,4 +796,4 @@ class kDistOptBand:
 
         for i in self.gCombine.keys(): print(self.gCombine[i])
     # end findOptimal()
-# end kDistOptBand
+# end gCombine_Cost
