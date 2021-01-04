@@ -486,35 +486,32 @@ class gCombine_kDist:
                     elif ncVar in self.kMinor:
                         # upper or lower atmosphere variable?
                         iVar = self.kMinor.index(ncVar)
+                        contribVar = self.kMinorContrib[iVar]
 
-                        # dimensions of this k-Minor variable
-                        print(outDS.sizes)
-                        sys.exit()
-                        ncDim = outDS.sizes[self.kMinorContrib[iVar]]
+                        # number of minor contributor intervals for this band 
+                        # and region
+                        intVar = self.kMinorInt[iVar]
+                        nContrib = outDS.sizes[intVar]
 
                         # upper or lower contributors dimension?
                         # not sure how to use this in the `where`, though
                         contribDim = self.kMinorContrib[iVar]
 
-                        dCon = (self.nGpt-1) * np.arange(ncDim)
-                        con1 = g1 + dCon
-                        con2 = g2 + dCon
-                        #kg1 = ncDat.isel(contributors_lower=conLo1)
-                        #kg2 = ncDat.isel(contributors_lower=conLo2)
-                        kg1 = ncDat.isel({contribDim: con1})
-                        kg2 = ncDat.isel({contribDim: con2})
- 
-                        if 'lower' in contribDim:
-                            ncDat = xa.where(ncDat.contributors_lower == con1,
-                                (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
-                        else:
-                            ncDat = xa.where(ncDat.contributors_upper == con1,
-                                (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
-                        # endif lower
+                        # combine g-points in each interval
+                        intervals = self.nGpt * np.arange(nContrib)
+                        iCon1 = g1 + intervals
+                        iCon2 = g2 + intervals
+                        kg1 = ncDat.isel({contribVar: iCon1})
+                        kg2 = ncDat.isel({contribVar: iCon2})
 
+                        # weighted average is easy, removing an index is clunky
+                        ncDat[{contribVar: iCon1}] = (kg1*w1 + kg2*w2) / (w1 + w2)
+                        ncDat[{contribVar: iCon2}] = np.nan
+                        ncDat = ncDat.dropna(contribDim)
+ 
                         # unpack dimension tuple and use elements as args into 
                         # numpy transpose method
-                        ncDat = ncDat.transpose(*varDims)
+                        #ncDat = ncDat.transpose(*varDims)
                     else:
                         # retain any variables without a gpt dimension
                         pass
