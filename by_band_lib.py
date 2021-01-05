@@ -1,4 +1,4 @@
-import os, sys, shutil
+import os, sys, shutil, glob
 import subprocess as sub
 
 # "standard" install
@@ -46,6 +46,64 @@ def pathCheck(path, mkdir=False):
         assert os.path.exists(path), 'Could not find {}'.format(path)
     # endif mkdir
 # end pathCheck
+
+def fluxCompute(inK, profiles, exe, fluxDir, outFile):
+    """
+    Compute fluxes for a given k-distribution and set of atmospheric
+    conditions
+
+    Inputs
+        inK -- string, k-distribution file to use in flux calcs
+        profiles -- string, netCDF with profile specifications
+        exe -- string, RRTMGP flux calculation executable path
+        fluxDir -- string, directory in which the executable is run
+        outFile -- string, file to which RRTMGP output is renamed
+    """
+
+    #print('Computing flux for {}'.format(inK))
+
+    """
+    if combine:
+        # extract "g??-??_iter??" and make a directory for it
+        fluxDir = '{}/{}'.format(self.workDir, suffix)
+        outFile = '{}/{}'.format(fluxDir, 
+            os.path.basename(inK).replace('coefficients', 'flux'))
+    else:
+        fluxDir = str(self.fullBandFluxDir)
+        outFile = str(self.fluxBandNC)
+    # endif combine
+    """
+
+    pathCheck(fluxDir, mkdir=True)
+    cwd = os.getcwd()
+    os.chdir(fluxDir)
+
+    # file staging for RRTMGP run
+    # trying to keep this simple/compact so we don't end up with a
+    # bunch of files in a directory
+    aPaths = [exe, inK]
+    rPaths = ['./run_rrtmgp', 'coefficients.nc']
+    for aPath, rPath in zip(aPaths, rPaths):
+        if os.path.islink(rPath): os.unlink(rPath)
+        os.symlink(aPath, rPath)
+    # end rPath loop
+
+    # so we don't overwrite the LBL results
+    inRRTMGP = 'rrtmgp-inputs-outputs.nc'
+    shutil.copyfile(profiles, inRRTMGP)
+
+    # assuming the RRTMGP call sequence is `exe inputs k-dist`
+    rPaths.insert(1, inRRTMGP)
+
+    # run the model with inputs
+    sub.call(rPaths)
+
+    # save outputs (inRRTMGP gets overwritten every run)
+    os.rename(inRRTMGP, outFile)
+    #print('Wrote {}'.format(outFile))
+
+    os.chdir(cwd)
+# end fluxCompute()
 
 class gCombine_kDist:
     def __init__(self, kFile, band, lw,
@@ -322,64 +380,6 @@ class gCombine_kDist:
         # endwith
     # end kDistBand()
 
-    def fluxCompute(self, inK, combine=False, suffix=None):
-        """
-        Compute fluxes for a given k-distribution and set of atmospheric
-        conditions
-
-        Inputs
-            inK -- string, k-distribution file to use in flux calcs
-
-        Keywords
-            combine -- boolean, specifies whether g-points are being 
-                combined; default is False and full k-distribution is 
-                split into bands with an equal number of g-points in 
-                each band
-            suffix -- string, g-point combination and iteration identifier
-        """
-
-        #print('Computing flux for {}'.format(inK))
-
-        if combine:
-            # extract "g??-??_iter??" and make a directory for it
-            fluxDir = '{}/{}'.format(self.workDir, suffix)
-            outFile = '{}/{}'.format(fluxDir, 
-                os.path.basename(inK).replace('coefficients', 'flux'))
-        else:
-            fluxDir = str(self.fullBandFluxDir)
-            outFile = str(self.fluxBandNC)
-        # endif combine
-
-        pathCheck(fluxDir, mkdir=True)
-        os.chdir(fluxDir)
-
-        # file staging for RRTMGP run
-        # trying to keep this simple/compact so we don't end up with a
-        # bunch of files in a directory
-        aPaths = [self.exe, inK]
-        rPaths = ['./run_rrtmgp', 'coefficients.nc']
-        for aPath, rPath in zip(aPaths, rPaths):
-            if os.path.islink(rPath): os.unlink(rPath)
-            os.symlink(aPath, rPath)
-        # end rPath loop
-
-        # so we don't overwrite the LBL results
-        inRRTMGP = 'rrtmgp-inputs-outputs.nc'
-        shutil.copyfile(self.profiles, inRRTMGP)
-
-        # assuming the RRTMGP call sequence is `exe inputs k-dist`
-        rPaths.insert(1, inRRTMGP)
-
-        # run the model with inputs
-        sub.call(rPaths)
-
-        # save outputs (inRRTMGP gets overwritten every run)
-        os.rename(inRRTMGP, outFile)
-        #print('Wrote {}'.format(outFile))
-
-        os.chdir(self.topDir)
-    # end fluxCompute()
-
     def gPointCombine(self):
         """
         Combine g-points in a given band with adjacent g-point and
@@ -503,7 +503,7 @@ class gCombine_kDist:
     # end gPointCombine()
 # end gCombine_kDist
 
-class gCombine_Cost:        
+class gCombine_Cost:
     def __init__(self, bandDict, fluxesLBL, fluxesRRTMGP, 
                 idxForce, iCombine,
                 profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE, 
@@ -562,14 +562,18 @@ class gCombine_Cost:
         self.fullBandKDir = str(fullBandKDir)
         self.fullBandFluxDir = str(fullBandFluxDir)
 
+        self.fullBandNC = sorted(
+            glob.glob('{}/flux_*.nc'.format(self.fullBandFluxDir)))
+
         self.compNameCF = list(costFuncComp)
         self.levCF = list(costFuncLevs)
         self.costWeights = list(costWeights)
 
         # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN OBJECT
 
-        # complete list of combinations of g-points (given band) and 
-        # full-band (other bands) netCDFs to be used in cost function
+        # complete list of dictionaries with combinations of 
+        # g-points for all bands and their associated flux working 
+        # directories
         self.ncCombine = []
 
         # metadata for keeping track of how g-points were
@@ -600,30 +604,45 @@ class gCombine_Cost:
         #self.gOrigID = range(1, self.nGpt+1)
     # end constructor
 
-    def combinations(self):
+    def comboK(self):
+        """
+        Map every g-point combination to a corresponding flux file
+        """
+
+        import pathlib as PL
+
+        # should be nBands * (nGpt-1) elements initially 
+        # (e.g., 16*15=240 for LW),
+        # then decreases by 1 for every iteration because of g-point combining
+        for iBand, band in enumerate(self.distBands.keys()):
+            kObj = self.distBands[band]
+            for nc in kObj.trialNC:
+                # flux directory is same path as netCDF without .nc extension
+                self.ncCombine.append(
+                    {'kNC': nc, 'fluxDir': PL.Path(nc).with_suffix('')})
+            # end nc loop
+        # end k object loop
+    # end comboK
+
+    def comboFlux(self):
         """
         Determine all possible combinations of g-points for which the cost 
         function is calculated. This will include all g-point combinations 
         in a given band along with the broadband fluxes from the other bands
         """
 
-        import glob
-
         print('Combining netCDFs for flux computation')
-
-        fullBandNC = sorted(
-            glob.glob('{}/flux_*.nc'.format(self.fullBandFluxDir)))
 
         # should be nBands * (nGpt-1) elements initially (240 for LW),
         # then decreases by 1 for every iteration because of g-point combining
         for iBand, band in enumerate(self.distBands.keys()):
             for combine in self.distBands[band].trialNC:
-                temp = list(fullBandNC)
-                temp[iBand] = str(combine)
-                self.ncCombine.append(temp)
+                temp = list(self.fullBandNC)
+                #temp[iBand] = str(combine)
+                #self.ncCombine.append(temp)
             # end loop over g-point combinations
         # end band loop
-    # end combinations
+    # end comboFlux
     
     def configParallel(self):
         """
@@ -642,8 +661,15 @@ class gCombine_Cost:
         Use for parallelization of fluxCompute() calls
         """
 
+        # extract "g??-??_iter??" and make a directory for it
+        fluxDir = '{}/{}'.format(self.workDir, suffix)
+        outFile = '{}/{}'.format(fluxDir, 
+            os.path.basename(inK).replace('coefficients', 'flux'))
+
         # by the time we're multithreading, we are in the 
         # g-point combining process
+        fluxCompute(kObj.kBandNC, kObj.profiles, kObj.exe, 
+                    kObj.fullBandFluxDir, kObj.fluxBandNC)
         self.fluxCompute(
             inDict['inK'], combine=True, suffix=inDict['comb_iter'])
     # end fluxComputePool()
@@ -660,8 +686,6 @@ class gCombine_Cost:
             concatDim -- string, name of dimension on which to combine fluxFiles
             outNC -- string, path of netCDF with combined fluxes and HRs
         """
-
-        import glob
 
         # TO DO: want to save these in the object attributes
         # flux files for this band and g-point combination iteration
