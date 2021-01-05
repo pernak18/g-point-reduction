@@ -48,8 +48,8 @@ def pathCheck(path, mkdir=False):
 # end pathCheck
 
 class gCombine_kDist:
-    def __init__(self, kFile, band, lw, idxForce, iCombine,
-                profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE, 
+    def __init__(self, kFile, band, lw,
+                topDir=CWD, exeRRTMGP=EXE, profilesNC=GARAND, 
                 fullBandKDir='band_k_dist', 
                 fullBandFluxDir='flux_calculations', cleanup=True):
         """
@@ -66,9 +66,6 @@ class gCombine_kDist:
                 k-distribution
             band -- int, band number that is being processed with object
             lw -- boolean, do longwave domain (otherwise shortwave)
-            idxForce -- int, index of forcing scenario
-            iCombine -- int, index for what iteration of g-point combining is
-                underway
 
         Keywords
             profilesNC -- string, path to netCDF with atmospheric profiles
@@ -83,7 +80,7 @@ class gCombine_kDist:
 
         # see constructor doc
         #print(kFile)
-        paths = [kFile, profilesNC, topDir, exeRRTMGP]
+        paths = [kFile, topDir, exeRRTMGP]
         for path in paths: pathCheck(path)
 
         self.kInNC = str(kFile)
@@ -91,39 +88,28 @@ class gCombine_kDist:
         self.band = self.iBand+1
         self.doLW = bool(lw)
         self.domainStr = 'LW' if lw else 'SW'
-        self.iForce = int(idxForce)
-        self.iCombine = int(iCombine)
         self.profiles = str(profilesNC)
         self.topDir = str(topDir)
         self.exe = str(exeRRTMGP)
         self.fullBandKDir = str(fullBandKDir)
         self.fullBandFluxDir = str(fullBandFluxDir)
-        self.initWeights = list(WEIGHTS)
-        self.nWeights0 = len(self.initWeights)
 
         # directory where model will be run for each g-point
         # combination
         self.workDir = '{}/workdir_band_{}'.format(self.topDir, self.band)
 
-        # directory to store optimal netCDFs for each iteration and band
-        self.optDir = '{}/band_{}_opt'.format(self.topDir, self.band)
-
-        paths = [self.workDir, self.optDir]
+        paths = [self.workDir, self.profiles]
         for path in paths: pathCheck(path, mkdir=True)
-
-        # metadata for keeping track of how g-points were
-        # combined; we will keep appending after each iteration
-        self.gCombine = {}
 
         # what netCDF variables have a g-point dimension and will thus
         # need to be modified in the combination iterations?
-        self.gptVars = ['kmajor', 'gpt_weights']
+        self.kMajVars = ['kmajor', 'gpt_weights']
         if self.doLW:
-            self.gptVars.append('plank_fraction')
+            self.kMajVars.append('plank_fraction')
         else:
-            self.gptVars += ['rayl_lower', 'rayl_upper',
-                            'solar_source_facular' ,
-                            'solar_source_sunspot', 'solar_source_quiet']
+            self.kMajVars += ['rayl_lower', 'rayl_upper',
+                              'solar_source_facular' ,
+                              'solar_source_sunspot', 'solar_source_quiet']
         # endif doLW
 
         # kminor variables that are nontrivial to combine
@@ -143,6 +129,11 @@ class gCombine_kDist:
 
         # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN OBJECT
 
+        # weights after a given combination iteration; start off with 
+        # full set of weights
+        self.iterWeights = list(WEIGHTS)
+        self.nWeights = len(self.iterWeights)
+
         # netCDF with the band k-distribution (to which kDistBand 
         # writes its output if it is band splitting); corresponding flux
         # start off as full band parameters, then are overwritten with
@@ -159,35 +150,13 @@ class gCombine_kDist:
         # and combination iteration
         self.trialNC = []
         
-        # list of xarray datasets that combines g-point combination 
-        # arrays (self.iBand) with full-band arrays (!= self.iBand)
-        self.trialDS = []
-
-        # the trialNC that optimizes cost function for given comb iter
-        # starts off as input file
-        self.optNC = str(self.kInNC)
+        # file for this band that is used when combining g-points in
+        # another band; starts off as full band k distribution file
+        self.iterNC = str(self.kInNC)
 
         # the number of g-points in a given comb iter
         self.nGpt = 16
 
-        # list of dictionaries used for fluxComputePool() input
-        self.fluxInputs = []
-
-        # weights after a given combination iteration; start off with 
-        # full set of weights
-        self.iterWeights = list(WEIGHTS)
-        self.nWeights = len(self.iterWeights)
-
-        # normalization factors defined in normCost() method
-        self.norm = []
-
-        # total cost of combining given g-points; should be one 
-        # element per combination
-        self.totalCost = []
-
-        # original g-point IDs for a given band
-        # TO DO: have not started trying to preserve these guys
-        self.gOrigID = range(1, self.nGpt+1)
     # end constructor
 
     def kDistBand(self, combine=False):
@@ -206,7 +175,7 @@ class gCombine_kDist:
         weightsDA = xa.DataArray(self.iterWeights, 
             dims={'gpt': range(self.nWeights)}, name='gpt_weights')
 
-        # for minor contributors
+        # for minor contributors; this should all be in the constructor now
         """
         alts = ['lower', 'upper']
         absIntDims = ['minor_absorber_intervals_{}'.format(alt) for alt in alts]
@@ -217,6 +186,7 @@ class gCombine_kDist:
         zipMinor = zip(absIntDims, contribDims, contribVars, startVars)
         """
 
+        """
         self.kMinor = ['kminor_{}'.format(reg) for reg in regions]
         self.kMinorStart = ['kminor_start_{}'.format(reg) for alt in regions]
         self.kMinorLims = \
@@ -224,6 +194,7 @@ class gCombine_kDist:
         self.kMinorInt = \
             ['minor_absorber_intervals_{}'.format(reg) in regions]
         self.kMinorContrib = ['contributors_{}'.format(reg) for reg in regions]
+        """
         zipMinor = zip(
             self.kMinorInt, self.kMinorContrib, self.kMinor, self.kMinorStart)
 
@@ -235,7 +206,7 @@ class gCombine_kDist:
             # based on initial, full-band k-distribution (i.e.,
             # before combining g-points)
             minorLims, iKeepAll = {}, {}
-            for absIntDim, lim in zip(absIntDims, limDims):
+            for absIntDim, lim in zip(self.kMinorInt, self.kMinorLims):
                 minorLims[absIntDim] = kAllDS[lim].values
 
             # Dataset that will be written to netCDF with new variables and
@@ -259,10 +230,10 @@ class gCombine_kDist:
                 # endif
 
                 # have to process contributors vars *after* absorber intervals
-                if contribDims[0] in varDims: continue
-                if contribDims[1] in varDims: continue
+                if self.kMinorContrib[0] in varDims: continue
+                if self.kMinorContrib[1] in varDims: continue
 
-                for absIntDim in absIntDims:
+                for absIntDim in self.kMinorInt:
                     if absIntDim in varDims:
                         # https://stackoverflow.com/a/25823710
                         # possibly less efficient, but more readable way to
@@ -434,8 +405,7 @@ class gCombine_kDist:
 
                 # loop over each g-point combination and create
                 # a k-distribution netCDF for each
-                gCombStr = 'g{:02d}-{:02d}_iter{:02d}'.format(
-                    g1+1, g2+1, self.iCombine)
+                gCombStr = 'g{:02d}-{:02d}_init'.format(g1+1, g2+1)
                 outNC='{}/coefficients_{}_{}.nc'.format(
                     self.workDir, self.domainStr, gCombStr)
                 self.trialNC.append(outNC)
@@ -452,9 +422,9 @@ class gCombine_kDist:
                 outDS.attrs['g_combine'] = '{}+{}'.format(g1+1, g2+1)
 
                 for ncVar in ncVars:
-                    ncDat = kDS[ncVar]
+                    ncDat = xa.DataArray(kDS[ncVar])
                     varDims = ncDat.dims
-                    if ncVar in self.gptVars:
+                    if ncVar in self.kMajVars:
                         kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
 
                         if ncVar == 'gpt_weights':
@@ -478,40 +448,45 @@ class gCombine_kDist:
                         # http://xarray.pydata.org/en/stable/generated/
                         # xarray.DataArray.where.html#xarray.DataArray.where
                         ncDat = ncDat.where(ncDat.gpt != g2, drop=True)
-                    elif ncVar in self.kMinorLims:
+                    elif ncVar in self.kMinorLims + ['bnd_limits_gpt']:
                         ncDat[:] = [1, self.nGpt-1]
                     elif ncVar in self.kMinorStart:
                         # 1 less g-point, but first starting index is unchanged
                         ncDat[1:] = ncDat[1:]-1
                     elif ncVar in self.kMinor:
-                        # upper or lower atmosphere variable?
+                        # upper (0) or lower (1) atmosphere variable?
                         iVar = self.kMinor.index(ncVar)
-                        contribVar = self.kMinorContrib[iVar]
 
                         # number of minor contributor intervals for this band 
                         # and region
-                        intVar = self.kMinorInt[iVar]
-                        nContrib = outDS.sizes[intVar]
+                        nInterval = outDS.sizes[self.kMinorInt[iVar]]
 
                         # upper or lower contributors dimension?
-                        # not sure how to use this in the `where`, though
                         contribDim = self.kMinorContrib[iVar]
 
-                        # combine g-points in each interval
-                        intervals = self.nGpt * np.arange(nContrib)
-                        iCon1 = g1 + intervals
-                        iCon2 = g2 + intervals
-                        kg1 = ncDat.isel({contribVar: iCon1})
-                        kg2 = ncDat.isel({contribVar: iCon2})
+                        # combine g-points in each minor interval
+                        intervals = self.nGpt * np.arange(nInterval)
+                        if np.nansum(ncDat.values) != 0:
+                            iCon1 = g1 + intervals
+                            iCon2 = g2 + intervals
 
-                        # weighted average is easy, removing an index is clunky
-                        ncDat[{contribVar: iCon1}] = (kg1*w1 + kg2*w2) / (w1 + w2)
-                        ncDat[{contribVar: iCon2}] = np.nan
-                        ncDat = ncDat.dropna(contribDim)
- 
-                        # unpack dimension tuple and use elements as args into 
-                        # numpy transpose method
-                        #ncDat = ncDat.transpose(*varDims)
+                            kg1 = ncDat.isel({contribDim: iCon1})
+                            kg2 = ncDat.isel({contribDim: iCon2})
+
+                            # weighted average is easy...
+                            ncDat[{contribDim: iCon1}] = \
+                               (kg1*w1 + kg2*w2) / (w1 + w2)
+
+                            # ...removing an index is clunky
+                            ncDat[{contribDim: iCon2}] = np.nan
+                            ncDat = ncDat.dropna(contribDim, how='all')
+                        else:
+                            # kminor_* has absorption of zero if there are no 
+                            # minor contributors because RRTMGP does not 
+                            # accept zero-length arrays, so we can just keep 
+                            # this array since it is a dummy
+                            pass
+                        # endif nansum
                     else:
                         # retain any variables without a gpt dimension
                         pass
@@ -524,14 +499,12 @@ class gCombine_kDist:
                 outDS.to_netcdf(outNC, 'w')
             # end combination loop
         # endwith kDS
-        self.nGpt -= 1
-        self.nWeights -= 1
     # end gPointCombine()
 # end gCombine_kDist
 
 class gCombine_Cost:        
-    def __init__(self, kFile, fluxesLBL, fluxesRRTMGP, 
-                band, lw, idxForce, iCombine,
+    def __init__(self, gCombineDict, fluxesLBL, fluxesRRTMGP, 
+                idxForce, iCombine,
                 profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE, 
                 fullBandKDir='band_k_dist', 
                 fullBandFluxDir='flux_calculations', cleanup=True, 
@@ -549,12 +522,9 @@ class gCombine_Cost:
             optimal combination of g-points
 
         Input
-            kFile -- string, netCDF with full (iteration 0) or reduced 
-                k-distribution
+            gCombineDict -- dictionary of `gCombine_kDist` objects
             fluxesLBL -- string, path to LBLRTM flux netCDF file
             fluxesRRTMGP -- string, path to RRTMGP flux netCDF file
-            band -- int, band number that is being processed with object
-            lw -- boolean, do longwave domain (otherwise shortwave)
             idxForce -- int, index of forcing scenario
             iCombine -- int, index for what iteration of g-point combining is
                 underway
@@ -577,9 +547,41 @@ class gCombine_Cost:
 
         self.lblNC = str(fluxesLBL)
         self.rrtmgpNC = str(fluxesRRTMGP)
+        self.iForce = int(idxForce)
+        self.iCombine = int(iCombine)
+        self.profiles = str(profilesNC)
         self.compNameCF = list(costFuncComp)
         self.levCF = list(costFuncLevs)
         self.costWeights = list(costWeights)
+
+        # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN OBJECT
+
+        # metadata for keeping track of how g-points were
+        # combined; we will keep appending after each iteration
+        self.gCombine = {}
+
+        # list of xarray datasets that combines g-point combination 
+        # arrays (self.iBand) with full-band arrays (!= self.iBand)
+        self.trialDS = []
+
+        # weights after a given combination iteration; start off with 
+        # full set of weights
+        self.iterWeights = list(WEIGHTS)
+        self.nWeights = len(self.iterWeights)
+
+        # list of dictionaries used for fluxComputePool() input
+        self.fluxInputs = []
+
+        # normalization factors defined in normCost() method
+        self.norm = []
+
+        # total cost of combining given g-points; should be one 
+        # element per combination
+        self.totalCost = []
+
+        # original g-point IDs for a given band
+        # TO DO: have not started trying to preserve these guys
+        self.gOrigID = range(1, self.nGpt+1)
     # end constructor
 
     def configParallel(self):
