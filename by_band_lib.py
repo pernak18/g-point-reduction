@@ -80,7 +80,8 @@ class gCombine_kDist:
 
         # see constructor doc
         #print(kFile)
-        paths = [kFile, topDir, exeRRTMGP]
+        paths = [kFile, topDir, exeRRTMGP, profilesNC, \
+                 fullBandKDir, fullBandFluxDir]
         for path in paths: pathCheck(path)
 
         self.kInNC = str(kFile)
@@ -503,7 +504,7 @@ class gCombine_kDist:
 # end gCombine_kDist
 
 class gCombine_Cost:        
-    def __init__(self, gCombineDict, fluxesLBL, fluxesRRTMGP, 
+    def __init__(self, bandDict, fluxesLBL, fluxesRRTMGP, 
                 idxForce, iCombine,
                 profilesNC=GARAND, topDir=CWD, exeRRTMGP=EXE, 
                 fullBandKDir='band_k_dist', 
@@ -522,7 +523,8 @@ class gCombine_Cost:
             optimal combination of g-points
 
         Input
-            gCombineDict -- dictionary of `gCombine_kDist` objects
+            bandDict -- dictionary of `gCombine_kDist` 
+                objects (one for each band)
             fluxesLBL -- string, path to LBLRTM flux netCDF file
             fluxesRRTMGP -- string, path to RRTMGP flux netCDF file
             idxForce -- int, index of forcing scenario
@@ -545,16 +547,30 @@ class gCombine_Cost:
             costWeights -- list of weights for each cost function component
         """
 
+        paths = [fluxesLBL, fluxesRRTMGP, profilesNC, topDir, exeRRTMGP, \
+                 fullBandKDir, fullBandFluxDir]
+        for path in paths: pathCheck(path)
+
+        self.distBands = dict(bandDict)
         self.lblNC = str(fluxesLBL)
         self.rrtmgpNC = str(fluxesRRTMGP)
         self.iForce = int(idxForce)
         self.iCombine = int(iCombine)
         self.profiles = str(profilesNC)
+        self.topDir = str(topDir)
+        self.exe = str(exeRRTMGP)
+        self.fullBandKDir = str(fullBandKDir)
+        self.fullBandFluxDir = str(fullBandFluxDir)
+
         self.compNameCF = list(costFuncComp)
         self.levCF = list(costFuncLevs)
         self.costWeights = list(costWeights)
 
         # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN OBJECT
+
+        # complete list of combinations of g-points (given band) and 
+        # full-band (other bands) netCDFs to be used in cost function
+        self.ncCombine = []
 
         # metadata for keeping track of how g-points were
         # combined; we will keep appending after each iteration
@@ -581,9 +597,34 @@ class gCombine_Cost:
 
         # original g-point IDs for a given band
         # TO DO: have not started trying to preserve these guys
-        self.gOrigID = range(1, self.nGpt+1)
+        #self.gOrigID = range(1, self.nGpt+1)
     # end constructor
 
+    def combinations(self):
+        """
+        Determine all possible combinations of g-points for which the cost 
+        function is calculated. This will include all g-point combinations 
+        in a given band along with the broadband fluxes from the other bands
+        """
+
+        import glob
+
+        print('Combining netCDFs for flux computation')
+
+        fullBandNC = sorted(
+            glob.glob('{}/flux_*.nc'.format(self.fullBandFluxDir)))
+
+        # should be nBands * (nGpt-1) elements initially (240 for LW),
+        # then decreases by 1 for every iteration because of g-point combining
+        for iBand, band in enumerate(self.distBands.keys()):
+            for combine in self.distBands[band].trialNC:
+                temp = list(fullBandNC)
+                temp[iBand] = str(combine)
+                self.ncCombine.append(temp)
+            # end loop over g-point combinations
+        # end band loop
+    # end combinations
+    
     def configParallel(self):
         """
         Generate input dictionaries for fluxComputePool() function
