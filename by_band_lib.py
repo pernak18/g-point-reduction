@@ -374,8 +374,6 @@ class gCombine_kDist:
             self.nGpt = kDS.dims['gpt']
             gCombine = [[x, x+1] for x in range(self.nGpt-1)]
             wCombine = [weights[np.array(gc)] for gc in gCombine]
-            print(gCombine)
-            sys.exit()
 
             for gc, wc in zip(gCombine, wCombine):
                 g1, g2 = gc
@@ -587,7 +585,7 @@ class gCombine_Cost:
         #self.gOrigID = range(1, self.nGpt+1)
     # end constructor
 
-    def kCombine(self):
+    def kMap(self):
         """
         Map every g-point combination to a corresponding flux file and 
         zero-offset ID number
@@ -613,7 +611,7 @@ class gCombine_Cost:
                     'fluxDir': fluxDir, 'bandID': iBand})
             # end nc loop
         # end band loop
-    # end kCombine
+    # end kMap
     
     def fluxComputePool(self):
         """
@@ -888,6 +886,7 @@ class gCombine_Cost:
         shutil.rmtree(bandObj.workDir)
 
         # combine g-points for next iteration
+        print('Recombining')
         newObj.gPointCombine()
     # end setupNextIter()
 # end gCombine_Cost
