@@ -99,7 +99,7 @@ def parallelFlux(inDict):
 # end fluxComputePool
 
 class gCombine_kDist:
-    def __init__(self, kFile, band, lw,
+    def __init__(self, kFile, band, lw, iCombine, 
                 topDir=CWD, exeRRTMGP=EXE, profilesNC=GARAND, 
                 fullBandKDir='band_k_dist', 
                 fullBandFluxDir='flux_calculations', cleanup=True):
@@ -117,6 +117,7 @@ class gCombine_kDist:
                 k-distribution
             band -- int, band number that is being processed with object
             lw -- boolean, do longwave domain (otherwise shortwave)
+            iCombine -- int, combination iteration number
 
         Keywords
             profilesNC -- string, path to netCDF with atmospheric profiles
@@ -139,6 +140,7 @@ class gCombine_kDist:
         self.iBand = int(band)
         self.band = self.iBand+1
         self.doLW = bool(lw)
+        self.iCombine = int(iCombine)
         self.domainStr = 'LW' if lw else 'SW'
         self.profiles = str(profilesNC)
         self.topDir = str(topDir)
@@ -372,6 +374,8 @@ class gCombine_kDist:
             self.nGpt = kDS.dims['gpt']
             gCombine = [[x, x+1] for x in range(self.nGpt-1)]
             wCombine = [weights[np.array(gc)] for gc in gCombine]
+            print(gCombine)
+            sys.exit()
 
             for gc, wc in zip(gCombine, wCombine):
                 g1, g2 = gc
@@ -379,7 +383,8 @@ class gCombine_kDist:
 
                 # loop over each g-point combination and create
                 # a k-distribution netCDF for each
-                gCombStr = 'g{:02d}-{:02d}_init'.format(g1+1, g2+1)
+                gCombStr = 'g{:02d}-{:02d}_iter{:03d}'.format(
+                    g1+1, g2+1, self.iCombine)
                 outNC='{}/coefficients_{}_{}.nc'.format(
                     self.workDir, self.domainStr, gCombStr)
                 self.trialNC.append(outNC)
@@ -428,19 +433,23 @@ class gCombine_kDist:
                         # 1 less g-point, but first starting index is unchanged
                         ncDat[1:] = ncDat[1:]-1
                     elif ncVar in self.kMinor:
-                        # upper (0) or lower (1) atmosphere variable?
-                        iVar = self.kMinor.index(ncVar)
-
-                        # number of minor contributor intervals for this band 
-                        # and region
-                        nInterval = outDS.sizes[self.kMinorInt[iVar]]
-
-                        # upper or lower contributors dimension?
-                        contribDim = self.kMinorContrib[iVar]
-
-                        # combine g-points in each minor interval
-                        intervals = self.nGpt * np.arange(nInterval)
+                        # kminor_* has absorption of zero if there are no 
+                        # minor contributors because RRTMGP does not 
+                        # accept zero-length arrays, so we can just keep 
+                        # this array since it is a dummy
                         if np.nansum(ncDat.values) != 0:
+                            # upper (0) or lower (1) atmosphere variable?
+                            iVar = self.kMinor.index(ncVar)
+
+                            # number of minor contributor intervals for this 
+                            # band and region
+                            nInterval = outDS.sizes[self.kMinorInt[iVar]]
+
+                            # upper or lower contributors dimension?
+                            contribDim = self.kMinorContrib[iVar]
+
+                            # combine g-points in each minor interval
+                            intervals = self.nGpt * np.arange(nInterval)
                             iCon1 = g1 + intervals
                             iCon2 = g2 + intervals
 
@@ -455,10 +464,6 @@ class gCombine_kDist:
                             ncDat[{contribDim: iCon2}] = np.nan
                             ncDat = ncDat.dropna(contribDim, how='all')
                         else:
-                            # kminor_* has absorption of zero if there are no 
-                            # minor contributors because RRTMGP does not 
-                            # accept zero-length arrays, so we can just keep 
-                            # this array since it is a dummy
                             pass
                         # endif nansum
                     else:
@@ -575,6 +580,7 @@ class gCombine_Cost:
 
         # what band contained the optimal g-point combination?
         self.optBand = None
+        self.optNC = None
 
         # original g-point IDs for a given band
         # TO DO: have not started trying to preserve these guys
@@ -847,6 +853,7 @@ class gCombine_Cost:
             'coefficients', 'band{:02d}_coefficients'.format(self.optBand+1))
         cpNC = '{}/{}'.format(self.optDir, base)
         shutil.copyfile(optNC, cpNC)
+        self.optNC = str(cpNC)
         print('Saved optimal combination to {}'.format(cpNC))
 
         # determine optimal combination and grab g-point combination attribute
@@ -863,6 +870,24 @@ class gCombine_Cost:
 
     def setupNextIter(self):
         """
+        Re-orient object for band that optimized cost function -- i.e., 
+        prepare it for another set of g-point combinations. Also clean up 
+        its working directory
         """
+
+        import copy
+        bandKey = list(self.distBands.keys())[self.optBand]
+        bandObj = self.distBands[bandKey]
+
+        # modify attributes of object to reflect next iteration
+        newObj = copy.deepcopy(bandObj)
+        newObj.kInNC = str(self.optNC)
+        newObj.iCombine = self.iCombine + 1
+
+        # clean up the optimal band's working directory
+        shutil.rmtree(bandObj.workDir)
+
+        # combine g-points for next iteration
+        newObj.gPointCombine()
     # end setupNextIter()
 # end gCombine_Cost
