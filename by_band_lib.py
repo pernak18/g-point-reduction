@@ -628,27 +628,6 @@ class gCombine_Cost:
             pool.map(parallelFlux, self.fluxInputs)
     # end fluxComputePool()
 
-    def comboFlux(self):
-        """
-        Determine all possible combinations of g-points for which the cost 
-        function is calculated. This will include all g-point combinations 
-        in a given band along with the broadband fluxes from the other bands
-        """
-
-        print('Combining netCDFs for flux computation')
-        fluxNC = []
-
-        # should be nBands * (nGpt-1) elements initially (240 for LW),
-        # then decreases by 1 for every iteration because of g-point combining
-        for iBand, band in enumerate(self.distBands.keys()):
-            for combine in self.distBands[band].trialNC:
-                temp = list(self.fullBandNC)
-                #temp[iBand] = str(combine)
-                #self.fluxPool.append(temp)
-            # end loop over g-point combinations
-        # end band loop
-    # end comboFlux
-    
     def fluxCombine(self):
         """
         Concatenate fluxes from separate files for each band into a single
@@ -712,6 +691,10 @@ class gCombine_Cost:
                                 dim={'record': nForce}, axis=0)
                         else:
                             newDims = ('record', 'lev', 'col', 'band')
+
+                            # rename flux_* to band_flux_*
+                            #ncVar = 'band_{}'.format(ncVar)
+                            #outDat = outDat.rename({ncVar: 'band_{}'.format(ncVar)})
                         # endif newDims
 
                         outDat = outDat.transpose(*newDims)
@@ -724,7 +707,7 @@ class gCombine_Cost:
                         #continue
                         gptLims = []
                         for iBand, bandDS in enumerate(fluxesMod):
-                            bandLims = bandDS['band_lims_gpt'].values.squeeze()
+                            bandLims = bandDS['band_lims_gpt'].squeeze()
                             if iBand == 0:
                                 gptLims.append(bandLims)
                             else:
@@ -744,23 +727,17 @@ class gCombine_Cost:
                         # retain any variables with no band dimension
                         outDat = trialDS[ncVar]
                     # endif ncVar
+
                     outDS[ncVar] = outDat
                 # end ncVar loop
 
                 # calculate broadband fluxes
                 for fluxVar in fluxVars:
-                    bandFlux = 'band_{}'.format(fluxVar)
-                    broadband = outDS[fluxVar].sum(dim='band')
-
-                    # first rename band flux (currently, the executable 
-                    # calls flux for a single band flux_*)
-                    outDS = outDS.rename_vars({fluxVar: bandFlux})
-
-                    # then reassign flux_* true broadband fluxes
-                    # TO DO: unfortunately, broadband variables still have 
-                    # a `band` dimension; not sure how to fix
-                    #outDS[fluxVar] = xa.DataArray(broadband, dims=['record', 'lev', 'col'])
-                    outDS[fluxVar] = xa.DataArray(broadband)
+                    dimsBB = ('record', 'lev', 'col')
+                    outDS = outDS.rename({fluxVar: 'band_{}'.format(fluxVar)})
+                    broadband = outDS['band_{}'.format(
+                        fluxVar)].sum(dim='band')
+                    outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
                 # end fluxVar loop
 
                 # calculate heating rates
@@ -768,10 +745,17 @@ class gCombine_Cost:
                 dNetBand = outDS['band_flux_net'].diff('lev')
                 dNetBB = outDS['flux_net'].diff('lev')
                 dP = outDS['p_lev'].diff('lev') / 10
-                outDS['band_heating_rate'] = HEATFAC * dNetBand / dP
-                outDS['heating_rate'] = HEATFAC * dNetBB / dP
-                #print(dNetBand.shape, dNetBB.shape, dP.shape)
-                #print(outDS.band_heating_rate.dims, outDS.heating_rate.dims)
+                temp = xa.DataArray(HEATFAC * dNetBand / dP)
+                temp = temp.dropna('lev', how='all')
+                temp = temp.swap_dims({'lev': 'lay'})
+                outDS['band_heating_rate'] = xa.DataArray(temp)
+
+                temp = xa.DataArray(HEATFAC * dNetBB / dP)
+                temp = temp.dropna('lev', how='all')
+                temp = temp.swap_dims({'lev': 'lay'})
+                outDS['heating_rate'] = xa.DataArray(
+                    temp, dims=('record', 'lay', 'col'))
+
                 self.trialDS.append(outDS)
             # endwith
         # end trial loop
@@ -813,7 +797,7 @@ class gCombine_Cost:
                         {pStr:self.pLevCF}, method='nearest')
 
                     # determine which dimensions over which to average
-                    dims = subsetErr.dims
+                    dims = subsetErr[cfVar].dims
                     calcDims = ['col', pStr]
                     if 'band' in dims: calcDims.append('band')
 
@@ -881,6 +865,7 @@ class gCombine_Cost:
         newObj = copy.deepcopy(bandObj)
         newObj.kInNC = str(self.optNC)
         newObj.iCombine = self.iCombine + 1
+        newObj.nGpt -= 1
 
         # clean up the optimal band's working directory
         shutil.rmtree(bandObj.workDir)
