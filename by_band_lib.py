@@ -409,12 +409,9 @@ class gCombine_kDist:
                             # g1 and g2
                             ncDat = xa.where(
                                 ncDat.gpt == g1, w1 + w2, ncDat)
-                        # define "local" g-point limits for given band rather than
-                        # using limits from entire k-distribution
                         else:
                             # replace g1' slice with weighted average of
-                            # g1 and g2; TO DO: make sure this is how
-                            # other params in addition to k are treated
+                            # g1 and g2;
                             # dimensions get swapped for some reason
                             ncDat = xa.where(ncDat.gpt == g1,
                                 (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
@@ -430,40 +427,6 @@ class gCombine_kDist:
                     elif ncVar in self.kMinorStart:
                         # 1 less g-point, but first starting index is unchanged
                         ncDat[1:] = ncDat[1:]-1
-                    elif ncVar in self.kMinor:
-                        # kminor_* has absorption of zero if there are no 
-                        # minor contributors because RRTMGP does not 
-                        # accept zero-length arrays, so we can just keep 
-                        # this array since it is a dummy
-                        if np.nansum(ncDat.values) != 0:
-                            # upper (0) or lower (1) atmosphere variable?
-                            iVar = self.kMinor.index(ncVar)
-
-                            # number of minor contributor intervals for this 
-                            # band and region
-                            nInterval = outDS.sizes[self.kMinorInt[iVar]]
-
-                            # upper or lower contributors dimension?
-                            contribDim = self.kMinorContrib[iVar]
-
-                            # combine g-points in each minor interval
-                            intervals = self.nGpt * np.arange(nInterval)
-                            iCon1 = g1 + intervals
-                            iCon2 = g2 + intervals
-
-                            kg1 = ncDat.isel({contribDim: iCon1})
-                            kg2 = ncDat.isel({contribDim: iCon2})
-
-                            # weighted average is easy...
-                            ncDat[{contribDim: iCon1}] = \
-                               (kg1*w1 + kg2*w2) / (w1 + w2)
-
-                            # ...removing an index is clunky
-                            ncDat[{contribDim: iCon2}] = np.nan
-                            ncDat = ncDat.dropna(contribDim, how='all')
-                        else:
-                            pass
-                        # endif nansum
                     else:
                         # retain any variables without a gpt dimension
                         pass
