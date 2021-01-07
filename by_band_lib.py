@@ -527,11 +527,6 @@ class gCombine_Cost:
         # arrays (self.iBand) with full-band arrays (!= self.iBand)
         self.trialDS = []
 
-        # weights after a given combination iteration; start off with 
-        # full set of weights
-        self.iterWeights = list(WEIGHTS)
-        self.nWeights = len(self.iterWeights)
-
         # normalization factors defined in normCost() method
         self.norm = []
 
@@ -629,7 +624,7 @@ class gCombine_Cost:
         # trial = g-point combination
         for iBand, trial in zip(bandIDs, bandTrials):
             #if iBand > 0: continue
-            print('Band {}'.format(iBand+1))
+            #print('Band {}'.format(iBand+1))
             outDS = xa.Dataset()
 
             with xa.open_dataset(trial) as trialDS:
@@ -814,21 +809,27 @@ class gCombine_Cost:
         its working directory
         """
 
-        import copy
         bandKey = list(self.distBands.keys())[self.optBand]
         bandObj = self.distBands[bandKey]
-
-        # modify attributes of object to reflect next iteration
-        newObj = copy.deepcopy(bandObj)
-        newObj.kInNC = str(self.optNC)
-        newObj.iCombine = self.iCombine + 1
-        newObj.nGpt -= 1
 
         # clean up the optimal band's working directory
         shutil.rmtree(bandObj.workDir)
 
         # combine g-points for next iteration
         print('Recombining')
+        newObj = gCombine_kDist(self.optNC, self.optBand, bandObj.doLW, 
+            self.iCombine+1, fullBandKDir=bandObj.fullBandKDir, 
+            fullBandFluxDir=bandObj.fullBandFluxDir)
         newObj.gPointCombine()
+        self.distBands['band{:02d}'.format(self.optBand+1)] = newObj
+        
+        # reset cost optimization attributes
+        self.totalCost = []
+        self.fluxInputs = []
+        self.trialDS = []
+        self.norm = []
+        self.totalCost = []
+        self.optBand = None
+        self.optNC = None
     # end setupNextIter()
 # end gCombine_Cost
