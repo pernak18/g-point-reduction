@@ -665,8 +665,8 @@ class gCombine_Cost:
 
         # trial = g-point combination
         for iBand, trial in zip(bandIDs, bandTrials):
-            if iBand > 0: continue
-            print(iBand)
+            #if iBand > 0: continue
+            print('Band {}'.format(iBand+1))
             outDS = xa.Dataset()
 
             with xa.open_dataset(trial) as trialDS:
@@ -741,20 +741,14 @@ class gCombine_Cost:
                 # end fluxVar loop
 
                 # calculate heating rates
-                # TO DO: doing it this way leaves HR with a lev dim, not lay
                 dNetBand = outDS['band_flux_net'].diff('lev')
                 dNetBB = outDS['flux_net'].diff('lev')
                 dP = outDS['p_lev'].diff('lev') / 10
-                temp = xa.DataArray(HEATFAC * dNetBand / dP)
-                temp = temp.dropna('lev', how='all')
-                temp = temp.swap_dims({'lev': 'lay'})
-                outDS['band_heating_rate'] = xa.DataArray(temp)
 
-                temp = xa.DataArray(HEATFAC * dNetBB / dP)
-                temp = temp.dropna('lev', how='all')
-                temp = temp.swap_dims({'lev': 'lay'})
+                outDS['band_heating_rate'] = xa.DataArray(
+                    HEATFAC * dNetBand / dP).swap_dims({'lev': 'lay'})
                 outDS['heating_rate'] = xa.DataArray(
-                    temp, dims=('record', 'lay', 'col'))
+                    HEATFAC * dNetBB / dP).swap_dims({'lev': 'lay'})
 
                 self.trialDS.append(outDS)
             # endwith
