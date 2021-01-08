@@ -450,7 +450,8 @@ class gCombine_Cost:
                 cleanup=True, 
                 costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
                 costWeights=CFWGT, 
-                optDir='{}/iter_optimizations'.format(os.getcwd())):
+                optDir='{}/iter_optimizations'.format(os.getcwd()), 
+                test=False):
         """
         flesh this out...
 
@@ -485,6 +486,7 @@ class gCombine_Cost:
             costWeights -- list of weights for each cost function component
             optDir -- string, directory with optimized solution for 
                 every iteration
+            test -- boolean, testing mode (only run 1 band)
         """
 
         paths = [fluxesLBL, fluxesRRTMGP, profilesNC, exeRRTMGP]
@@ -498,6 +500,7 @@ class gCombine_Cost:
         self.profiles = str(profilesNC)
         self.exe = str(exeRRTMGP)
         self.fullBandFluxes = list(fullBandFluxes)
+        self.testing = bool(test)
 
         for fluxNC in self.fullBandFluxes: pathCheck(fluxNC)
 
@@ -537,6 +540,9 @@ class gCombine_Cost:
         # what band contained the optimal g-point combination?
         self.optBand = None
         self.optNC = None
+
+        # have we arrived at our final optimization?
+        self.optimized = False
 
         # original g-point IDs for a given band
         # TO DO: have not started trying to preserve these guys
@@ -623,7 +629,7 @@ class gCombine_Cost:
 
         # trial = g-point combination
         for iBand, trial in zip(bandIDs, bandTrials):
-            #if iBand > 0: continue
+            if self.testing and iBand > 0: continue
             #print('Band {}'.format(iBand+1))
             outDS = xa.Dataset()
 
@@ -779,10 +785,32 @@ class gCombine_Cost:
         optimized the cost function, save the associated k netCDF
         """
 
-        iOpt = np.nanargmin(self.totalCost)
-        optNC = self.fluxInputs[iOpt]['kNC']
+        while True:
+            iOpt = np.nanargmin(self.totalCost)
+            optNC = self.fluxInputs[iOpt]['kNC']
+
+            with xa.open_dataset(optNC) as optDS: nGpt = optDS.dims['gpt']
+
+            if nGpt > 1: break
+
+            # remove trial from consideration if no more g-point combining 
+            # is possible
+            self.fluxInputs.pop(iOpt)
+            self.trialDS.pop(iOpt)
+            self.norm.pop(iOpt)
+            self.totalCost.pop(iOpt)
+
+            if len(self.totalCost) == 0:
+                self.optimized = True
+                return
+            # endif 0
+        # end while
+
         self.optBand = self.fluxInputs[iOpt]['bandID']
+
+        # assuming coefficients_LW_g??-??_iter???.nc convention
         base = os.path.basename(optNC)
+        base = '{}{:03d}.nc'.format(base[:-6], self.iCombine)
         base = base.replace(
             'coefficients', 'band{:02d}_coefficients'.format(self.optBand+1))
         cpNC = '{}/{}'.format(self.optDir, base)
@@ -817,14 +845,14 @@ class gCombine_Cost:
 
         # combine g-points for next iteration
         print('Recombining')
+        self.iCombine += 1
         newObj = gCombine_kDist(self.optNC, self.optBand, bandObj.doLW, 
-            self.iCombine+1, fullBandKDir=bandObj.fullBandKDir, 
+            self.iCombine, fullBandKDir=bandObj.fullBandKDir, 
             fullBandFluxDir=bandObj.fullBandFluxDir)
         newObj.gPointCombine()
         self.distBands['band{:02d}'.format(self.optBand+1)] = newObj
         
         # reset cost optimization attributes
-        self.totalCost = []
         self.fluxInputs = []
         self.trialDS = []
         self.norm = []
