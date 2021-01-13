@@ -67,7 +67,7 @@ CLEANUP = False
 NITER = 1
 
 # cost function variables
-CFCOMPS = ['band_flux_dn', 'flux_dn']
+CFCOMPS = ['band_flux_net', 'flux_net']
 CFLEVS = [0, 10000, 102000] # pressure levels of interest in Pa
 CFWGT = [0.5, 0.5]
 
@@ -84,8 +84,9 @@ coObj = BYBAND.gCombine_Cost(
     costWeights=CFWGT, test=False)
 
 NITER = 2
-t1 = time.process_time()
 for i in range(1, NITER+1):
+    t1 = time.process_time()
+
     print('Iteration {}'.format(i))
     temp = time.process_time()
     coObj.kMap()
@@ -110,8 +111,12 @@ for i in range(1, NITER+1):
     if coObj.optimized: break
 
     coObj.setupNextIter()
+
+    print('Full iteration: {:.4f}'.format(time.process_time()-t1))
 # end iteration loop
-print('Two iterations: {:.4f}'.format(time.process_time()-t1))
-#coObj.calcOptFlux()
+
+t1 = time.process_time()
+coObj.calcOptFlux(KFULLNC)
+print('New k-file {:.4f}'.format(time.process_time()-t1))
 
 print('Optimization complete')

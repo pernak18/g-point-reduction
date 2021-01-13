@@ -25,9 +25,6 @@ ncFiles = [
 # initialize outputs
 fullDict = {}
 
-# initialize dictionary keys -- one for each k-dist variable
-#for refVar in refVars: fullDict[refVar] = np.array([]) #xa.DataArray()
-
 # what netCDF variables have a g-point dimension and will thus
 # need to be modified in the combination iterations?
 kMajor = ['kmajor', 'plank_fraction']
@@ -175,20 +172,40 @@ outDims = {
     'pressure': 59, 
     'absorber_ext': 20, 
     'fit_coeffs': 2, 
-    'contributors_lower': len(startLo), 
-    'contributors_upper': len(startUp)
+    'contributors_lower': fullDict['kminor_lower'].shape[-1], 
+    'contributors_upper': fullDict['kminor_upper'].shape[-1]
 }
 
+# extract dimensions from reference LBL netCDF for consistency
+refNC = '/global/project/projectdirs/e3sm/pernak18/reference_netCDF/' + \
+    'g-point-reduce/rrtmgp-data-lw-g256-2018-12-04.nc'
 outDict = {}
-for key in fullDict.keys():
-    #if not kDS[key].dims: continue # was not the problem
-    outDict[key] = {"dims": kDS[key].dims, "data": fullDict[key]}
+with xa.open_dataset(refNC) as refDS:
+    for iKey, key in enumerate(list(fullDict.keys())):
+        # string arrays have to be handled differently
+        # should just handle them better when populating fullDict
+        if iKey in [6, 7, 8]:
+            data = fullDict[key][:,0].astype(str)
+        elif iKey in [9, 10, 18, 19]:
+            data = fullDict[key].astype(str)
+        else:
+            data = fullDict[key]
+        # endif iKey
+
+        outDict[key] = {"dims": refDS[key].dims, "data": data}
+# endwith
+
+outCoord = {}
+for key in outDims.keys(): 
+    outCoord[key] = {'dims': (key), "data": range(outDims[key])}
 
 # make an acceptable dictionary for xarray.Dataset.from_dict()
-# add coordinates and attributes eventually?
-dsDict = {"dims": outDims, "data_vars": outDict}
+dsDict = {
+    "coords": outCoord,
+    "dims": outDims, 
+    "data_vars": outDict
+}
 
-#for key in fullDict.keys():
-# still doesn't work!
-# ValueError: cannot convert dict without the key 'dims'
 outDS = xa.Dataset.from_dict(dsDict)
+outDS.to_netcdf('temp.nc')
+print('Wrote temp.nc')
