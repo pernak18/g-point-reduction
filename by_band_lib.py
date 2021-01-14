@@ -177,10 +177,6 @@ class gCombine_kDist:
             ['minor_absorber_intervals_{}'.format(reg) for reg in regions]
         self.kMinorContrib = ['contributors_{}'.format(reg) for reg in regions]
 
-        # xarray datasets for initial (full-k) RRTMGP and LBLRTM fluxes
-        #self.rrtmgpDS = xa.open_dataset(self.rrtmgpNC)
-        #self.lblDS = xa.open_dataset(self.lblNC)
-
         # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN OBJECT
 
         # weights after a given combination iteration; start off with 
@@ -368,8 +364,8 @@ class gCombine_kDist:
 
             # combine all nearest neighbor g-point indices
             # and associated weights for given band
-            self.nGpt = kDS.dims['gpt']
-            gCombine = [[x, x+1] for x in range(self.nGpt-1)]
+            nNew = kDS.dims['gpt']-1
+            gCombine = [[x, x+1] for x in range(nNew)]
             wCombine = [weights[np.array(gc)] for gc in gCombine]
 
             for gc, wc in zip(gCombine, wCombine):
@@ -420,13 +416,10 @@ class gCombine_kDist:
                         # xarray.DataArray.where.html#xarray.DataArray.where
                         ncDat = ncDat.where(ncDat.gpt != g2, drop=True)
                     elif ncVar in self.kMinorLims + ['bnd_limits_gpt']:
-                        ncDat[:] = [1, self.nGpt-1]
-                    elif ncVar in self.kMinorStart:
-                        # 1 less g-point, but first starting index is unchanged
-                        # TO DO: *very* wrong output needs to be fixed
-                        ncDat[1:] = ncDat[1:]-1
+                        ncDat[:] = [1, nNew]
+                    elif ncVar in self.kMinor:
+                        continue
                     else:
-                        # TO DO: KMINOR_*!!!!
                         # retain any variables without a gpt dimension
                         pass
                     # endif ncVar
@@ -435,6 +428,44 @@ class gCombine_kDist:
                     outDS[ncVar] = xa.DataArray(ncDat)
                 # end ncVar loop
 
+                # some minor contributor variables need to be done after 
+                # the ncVar loop because g-points need to be combined
+                for iVar, minIntVar in enumerate(self.kMinorInt):
+                    minCon = self.kMinorContrib[iVar]
+                    kMinor = self.kMinor[iVar]
+                    ncDat = kDS[kMinor]
+                    varDims = ncDat.dims
+
+                    # no minor absorption contributions
+                    minCond1 = 'upper' in minCon and \
+                        self.iBand in [3, 11, 13, 14, 15]
+                    minCond2 = 'lower' in minCon and self.iBand == 13
+
+                    if minCond1 or minCond2:
+                        # grab a single, arbitrary slice of the kminor array
+                        # and replace it with zeroes (cannot have 0-length 
+                        # arrays in RRTMGP)
+                        ncDat = ncDat.where(ncDat[minCon] == 0, drop=True) * 0
+                    else:
+                        for minInt in range(kDS.dims[minIntVar]):
+                            dG = minInt*nNew
+                            cg1, cg2 = g1 + dG, g2 + dG
+                            kg1 = ncDat.isel({minCon: cg1})
+                            kg2 = ncDat.isel({minCon: cg2})
+
+                            ncDat = xa.where(ncDat[minCon] == cg1,
+                                (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
+                            ncDat = ncDat.where(ncDat[minCon] != cg2, 
+                                drop=True)
+                            ncDat = ncDat.transpose(*varDims)
+                        # end interval loop
+                    # endif no absorption
+                    outDS[kMinor] = xa.DataArray(ncDat)
+                # end interval variable loop
+
+                for minStart, minLim in zip(self.kMinorStart, self.kMinorLims):
+                    outDS[minStart] = outDS[minLim].cumsum()[:,1]-nNew
+                    
                 outDS.to_netcdf(outNC, 'w')
             # end combination loop
         # endwith kDS
@@ -450,9 +481,10 @@ class gCombine_Cost:
                 costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
                 costWeights=CFWGT, 
                 optDir='{}/iter_optimizations'.format(os.getcwd()), 
+                optFluxNC='optimized_fluxes.nc', 
                 test=False):
         """
-        flesh this out...
+        flesh this doc out...
 
         - For a given band, loop over possible g-point combinations within
             each band, creating k-distribution and band-wise flux files for
@@ -486,6 +518,8 @@ class gCombine_Cost:
             optDir -- string, directory with optimized solution for 
                 every iteration
             test -- boolean, testing mode (only run 1 band)
+            optFluxNC -- string, path for optimized flux netCDF after 
+                g-point reduction
         """
 
         paths = [fluxesLBL, fluxesRRTMGP, profilesNC, exeRRTMGP]
@@ -500,6 +534,7 @@ class gCombine_Cost:
         self.exe = str(exeRRTMGP)
         self.fullBandFluxes = list(fullBandFluxes)
         self.testing = bool(test)
+        self.optFluxNC = str(optFluxNC)
 
         for fluxNC in self.fullBandFluxes: pathCheck(fluxNC)
 
@@ -1072,7 +1107,8 @@ class gCombine_Cost:
                 # endif iKey
 
                 outDict[key] = {"dims": refDS[key].dims, "data": data}
-                #outDims = refDS.dims
+                # need to unfreeze dims for reassignment i think
+                #outDims = dict(refDS.dims)
         # endwith
 
         # dimensions after g-point reduction
@@ -1095,5 +1131,8 @@ class gCombine_Cost:
         outDS = xa.Dataset.from_dict(dsDict)
         outDS.to_netcdf(outNC)
         print('Wrote {}'.format(outNC))
+
+        fluxCompute(outNC, self.profiles, self.exe, '.', self.optFluxNC)
+        print('Saved new fluxes to {}/{}'.format('.', self.optFluxNC))
     # end calcOptFlux()
 # end gCombine_Cost

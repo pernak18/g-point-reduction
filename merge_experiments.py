@@ -209,3 +209,9 @@ dsDict = {
 outDS = xa.Dataset.from_dict(dsDict)
 outDS.to_netcdf('temp.nc')
 print('Wrote temp.nc')
+
+import by_band_lib as BYBAND
+BYBAND.fluxCompute('temp.nc', 
+                   '/project/projectdirs/e3sm/pernak18/reference_netCDF/g-point-reduce/multi_garand_template_broadband.nc', 
+                   'k-distribution-opt/rrtmgp_garand_atmos', '.', 'optimized_fluxes.nc')
+print('Saved new fluxes to ./optimized_fluxes.nc')
