@@ -464,7 +464,7 @@ class gCombine_kDist:
                 # end interval variable loop
 
                 for minStart, minLim in zip(self.kMinorStart, self.kMinorLims):
-                    outDS[minStart] = outDS[minLim].cumsum()[:,1]-nNew
+                    outDS[minStart] = outDS[minLim][:,1].cumsum()-nNew+1
                     
                 outDS.to_netcdf(outNC, 'w')
             # end combination loop
