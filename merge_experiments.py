@@ -5,7 +5,7 @@ import xarray as xa
 import numpy as np
 
 ncFiles = [
-    'iter_optimizations/band01_coefficients_LW_g13-14_iter003.nc', 
+    'iter_optimizations/band01_coefficients_LW_g05-06_iter003.nc', 
     'band_k_dist/coefficients_LW_band02.nc', 
     'band_k_dist/coefficients_LW_band03.nc', 
     'band_k_dist/coefficients_LW_band04.nc', 
@@ -185,14 +185,23 @@ with xa.open_dataset(refNC) as refDS:
         # string arrays have to be handled differently
         # should just handle them better when populating fullDict
         if iKey in [6, 7, 8]:
-            data = fullDict[key][:,0].astype(str)
+            oldData = fullDict[key][:,0].astype(str)
+            data = []
+            for dat in oldData:
+                data.append(list(str(dat)))
+            dims = (refDS[key].dims[0], 'string_len')
         elif iKey in [9, 10, 18, 19]:
-            data = fullDict[key].astype(str)
+            oldData = fullDict[key].astype(str)
+            data = []
+            for dat in oldData:
+                data.append(list(str(dat)))
+            dims = (refDS[key].dims[0], 'string_len')
         else:
             data = fullDict[key]
+            dims = refDS[key].dims
         # endif iKey
 
-        outDict[key] = {"dims": refDS[key].dims, "data": data}
+        outDict[key] = {"dims": dims, "data": data}
 # endwith
 
 outCoord = {}
