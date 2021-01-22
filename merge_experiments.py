@@ -41,6 +41,9 @@ for reg in regions:
     minorVars.append('scaling_gas_{}'.format(reg))
 # end region loop
 
+scalars = ['absorption_coefficient_ref_P', 'absorption_coefficient_ref_T', 
+           'press_ref_trop']
+
 nGpt = []
 
 # number of minor contributors per band
@@ -62,7 +65,10 @@ for iNC, ncFile in enumerate(ncFiles):
             varSizes = varDA.sizes
 
             # is the variable empty (e.g., no minor contributors)?
-            if not varSizes: continue
+            if not varSizes:
+                if ncVar in scalars: fullDict[ncVar] = varDA
+                continue
+            # endif empty var
 
             # minor contributors coming back to haunt me
             # no contributions in a given band
@@ -85,12 +91,10 @@ for iNC, ncFile in enumerate(ncFiles):
             if ncVar not in fullDict.keys():
                 if ncVar in minorVars:
                     fullDict[ncVar] = varArr.tolist()
-                elif ncVar in strVars:
-                    fullDict[ncVar] = [varArr]
                 else:
                     fullDict[ncVar] = varArr
                 # endif ncVar
-            elif '_ref' in ncVar:
+            elif '_ref' in ncVar or ncVar in strVars:
                 # these are the same for every band and can be overwritten
                 fullDict[ncVar] = varArr
             else:
@@ -181,26 +185,9 @@ refNC = '/global/project/projectdirs/e3sm/pernak18/reference_netCDF/' + \
     'g-point-reduce/rrtmgp-data-lw-g256-2018-12-04.nc'
 outDict = {}
 with xa.open_dataset(refNC) as refDS:
-    for iKey, key in enumerate(list(fullDict.keys())):
-        # string arrays have to be handled differently
-        # should just handle them better when populating fullDict
-        if iKey in [6, 7, 8]:
-            oldData = fullDict[key][:,0].astype(str)
-            data = []
-            for dat in oldData:
-                data.append(list(str(dat)))
-            dims = (refDS[key].dims[0], 'string_len')
-        elif iKey in [9, 10, 18, 19]:
-            oldData = fullDict[key].astype(str)
-            data = []
-            for dat in oldData:
-                data.append(list(str(dat)))
-            dims = (refDS[key].dims[0], 'string_len')
-        else:
-            data = fullDict[key]
-            dims = refDS[key].dims
-        # endif iKey
-
+    for key in fullDict.keys():
+        data = fullDict[key]
+        dims = refDS[key].dims
         outDict[key] = {"dims": dims, "data": data}
 # endwith
 
@@ -219,6 +206,7 @@ outDS = xa.Dataset.from_dict(dsDict)
 outDS.to_netcdf('temp.nc')
 print('Wrote temp.nc')
 
+sys.exit()
 import by_band_lib as BYBAND
 BYBAND.fluxCompute('temp.nc', 
                    '/project/projectdirs/e3sm/pernak18/reference_netCDF/g-point-reduce/multi_garand_template_broadband.nc', 
