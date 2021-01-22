@@ -5,22 +5,23 @@ import xarray as xa
 import numpy as np
 
 ncFiles = [
-    'iter_optimizations/band01_coefficients_LW_g05-06_iter003.nc', 
-    'band_k_dist/coefficients_LW_band02.nc', 
-    'band_k_dist/coefficients_LW_band03.nc', 
-    'band_k_dist/coefficients_LW_band04.nc', 
-    'band_k_dist/coefficients_LW_band05.nc', 
-    'band_k_dist/coefficients_LW_band06.nc', 
-    'band_k_dist/coefficients_LW_band07.nc', 
-    'band_k_dist/coefficients_LW_band08.nc', 
-    'band_k_dist/coefficients_LW_band09.nc', 
-    'band_k_dist/coefficients_LW_band10.nc', 
-    'band_k_dist/coefficients_LW_band11.nc', 
-    'band_k_dist/coefficients_LW_band12.nc', 
-    'band_k_dist/coefficients_LW_band13.nc', 
-    'band_k_dist/coefficients_LW_band14.nc', 
-    'band_k_dist/coefficients_LW_band15.nc', 
-    'band_k_dist/coefficients_LW_band16.nc']
+    '/global/u1/p/pernak18/RRTMGP/sandbox/iter_optimizations/band01_coefficients_LW_g05-06_iter011.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/iter_optimizations/band02_coefficients_LW_g01-02_iter017.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band03.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band04.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band05.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band06.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band07.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band08.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band09.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band10.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band11.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band12.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band13.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band14.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band15.nc', 
+    '/global/u1/p/pernak18/RRTMGP/sandbox/band_k_dist/coefficients_LW_band16.nc'
+]
 
 # initialize outputs
 fullDict = {}

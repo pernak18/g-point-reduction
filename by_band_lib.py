@@ -18,6 +18,12 @@ GARAND = '{}/reference_netCDF/g-point-reduce/'.format(PROJECT) + \
   'multi_garand_template_single_band.nc'
 CWD = os.getcwd()
 
+# these paths are needed for all-band flux calculations
+EXEFULL = PROJECT + \
+  '/g-point-reduction/k-distribution-opt/rrtmgp_garand_atmos'
+NCFULLPROF = PROJECT + \
+    '/reference_netCDF/g-point-reduce/multi_garand_template_broadband.nc'
+
 # user must do `pip install xarray` on cori (or other NERSC machines)
 import xarray as xa
 
@@ -938,7 +944,8 @@ class gCombine_Cost:
         self.optNC = None
     # end setupNextIter()
 
-    def calcOptFlux(self, kRefNC, outNC='rrtmgp-data-lw-g-red.nc'):
+    def calcOptFlux(self, kRefNC, exeFull=EXEFULL, ncFullProf=NCFULLPROF, 
+                    outNC='rrtmgp-data-lw-g-red.nc'):
         """
         Once the optimized solution has been found, combine k-distribution
         from each band into single netCDF, then calculate flux for the 
@@ -1021,12 +1028,10 @@ class gCombine_Cost:
                     if ncVar not in fullDict.keys():
                         if ncVar in minorVars:
                             fullDict[ncVar] = varArr.tolist()
-                        elif ncVar in strVars:
-                            fullDict[ncVar] = [varArr]
                         else:
                             fullDict[ncVar] = varArr
                         # endif ncVar
-                    elif '_ref' in ncVar:
+                    elif '_ref' in ncVar or ncVar in strVars:
                         # these are the same for every band and 
                         # can be overwritten
                         fullDict[ncVar] = varArr
@@ -1131,7 +1136,7 @@ class gCombine_Cost:
         outDS.to_netcdf(outNC)
         print('Wrote {}'.format(outNC))
 
-        fluxCompute(outNC, self.profiles, self.exe, '.', self.optFluxNC)
+        fluxCompute(outNC, ncFullProf, exeFull, '.', self.optFluxNC)
         print('Saved new fluxes to {}/{}'.format('.', self.optFluxNC))
     # end calcOptFlux()
 # end gCombine_Cost
