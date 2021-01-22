@@ -401,17 +401,22 @@ class gCombine_kDist:
                     ncDat = xa.DataArray(kDS[ncVar])
                     varDims = ncDat.dims
                     if ncVar in self.kMajVars:
-                        kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
-
                         if ncVar == 'gpt_weights':
                             # replace g1' weight with integrated weight at
                             # g1 and g2
                             ncDat = xa.where(
                                 ncDat.gpt == g1, w1 + w2, ncDat)
+                        if ncVar == 'plank_fraction':
+                            # replace g1' weight with integrated weight at
+                            # g1 and g2
+                            pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
+                            ncDat = xa.where(ncDat.gpt == g1, pg1 + pg2, ncDat)
+                            ncDat = ncDat.transpose(*varDims)
                         else:
                             # replace g1' slice with weighted average of
                             # g1 and g2;
                             # dimensions get swapped for some reason
+                            kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
                                 (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
                             ncDat = ncDat.transpose(*varDims)
