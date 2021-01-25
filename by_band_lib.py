@@ -406,7 +406,7 @@ class gCombine_kDist:
                             # g1 and g2
                             ncDat = xa.where(
                                 ncDat.gpt == g1, w1 + w2, ncDat)
-                        if ncVar == 'plank_fraction':
+                        elif ncVar == 'plank_fraction':
                             # replace g1' weight with integrated weight at
                             # g1 and g2
                             pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
@@ -488,7 +488,7 @@ class gCombine_Cost:
                 fluxesLBL, fluxesRRTMGP, 
                 idxForce, iCombine,
                 profilesNC=GARAND, exeRRTMGP=EXE, 
-                cleanup=True, 
+                cleanup=False, 
                 costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
                 costWeights=CFWGT, 
                 optDir='{}/iter_optimizations'.format(os.getcwd()), 
@@ -521,6 +521,8 @@ class gCombine_Cost:
             topDir -- string, path to top level of git repository clone
             exeRRTMGP -- string, path to RRTMGP executable that is run
                 in flux calculations
+            cleanup -- boolean, delete files and subdirectories in working 
+                directories after each iteration and after full optimization
             costFuncComp -- list of strings; netCDF variable names of the 
                 arrays to include in the cost function
             costFuncLevs -- list of floats; pressure levels in Pa to be 
@@ -546,6 +548,7 @@ class gCombine_Cost:
         self.fullBandFluxes = list(fullBandFluxes)
         self.testing = bool(test)
         self.optFluxNC = str(optFluxNC)
+        self.cleanup = bool(cleanup)
 
         for fluxNC in self.fullBandFluxes: pathCheck(fluxNC)
 
@@ -675,6 +678,8 @@ class gCombine_Cost:
         Time consuming (~90 seconds per iteration). Parallizeable?
         """
 
+        # either combine datasets for all bands or just the single 
+        # modified band for which new g-points have been combined
         iterInputs = list(self.fluxInputsAll) if self.iCombine == 1 else \
             list(self.fluxInputsMod['Band{:02d}'.format(self.modBand[0]+1)])
 
@@ -685,6 +690,10 @@ class gCombine_Cost:
         bandIDs = [inputs['bandID'] for inputs in iterInputs]
 
         nBands = len(self.fullBandFluxes)
+
+        # clear datasets for modified bands
+        for iBand in self.modBand:
+            self.modTrialDS['Band{:02d}'.format(iBand+1)] = []
 
         # open all of the full-band netCDFs as xarray datasets
         # will be combined accordingly with single-band g-point combinations
@@ -703,10 +712,6 @@ class gCombine_Cost:
 
         print('Combining trial fluxes with full-band fluxes')
 
-        # TO DO: this can be more efficient -- not EVERY trialDS
-        # needs to be regenerated -- only the ones from the most 
-        # recently modified band (which should be saved as an object att)
-
         # trial = g-point combination
         for iBand, trial in zip(bandIDs, bandTrials):
             if iBand not in self.modBand: continue
@@ -714,7 +719,6 @@ class gCombine_Cost:
             #print('Band {}'.format(iBand+1))
             bandKey = 'Band{:02d}'.format(iBand+1)
 
-            self.modTrialDS[bandKey] = []
             outDS = xa.Dataset()
 
             with xa.open_dataset(trial) as trialDS:
@@ -924,7 +928,7 @@ class gCombine_Cost:
         bandObj = self.distBands[bandKey]
 
         # clean up the optimal band's working directory
-        shutil.rmtree(bandObj.workDir)
+        if self.cleanup: shutil.rmtree(bandObj.workDir)
 
         # combine g-points for next iteration
         print('Recombining')
