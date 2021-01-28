@@ -529,7 +529,7 @@ class gCombine_Cost:
                 used in the cost function
             costWeights -- list of weights for each cost function component
             optDir -- string, directory with optimized solution for 
-                every iteration
+                every iteration and associated diagnostics (if specified)
             test -- boolean, testing mode (only run 1 band)
             optFluxNC -- string, path for optimized flux netCDF after 
                 g-point reduction
@@ -553,8 +553,10 @@ class gCombine_Cost:
         for fluxNC in self.fullBandFluxes: pathCheck(fluxNC)
 
         self.bands = list(self.distBands.keys())
+        self.nBands = len(self.bands)
+
         errMsg = 'Inconsistent k-distributions and fluxes'
-        assert len(self.bands) == len(self.fullBandFluxes), errMsg
+        assert self.nBands == len(self.fullBandFluxes), errMsg
 
         self.compNameCF = list(costFuncComp)
         self.pLevCF = list(costFuncLevs)
@@ -590,6 +592,10 @@ class gCombine_Cost:
 
         # normalization factors defined in normCost() method
         self.norm = []
+
+        # cost components -- 1 key per cost variable, values are 
+        # nTrial x nCostFuncLevs array 
+        self.costComps = {}
 
         # total cost of combining given g-points; should be one 
         # element per combination
@@ -662,7 +668,7 @@ class gCombine_Cost:
         # THIS NEEDS TO BE ADJUSTED FOR NERSC! cutting the total nCores in half
         nCores = multiprocessing.cpu_count() // 2
 
-        print('Calculating fluxes')
+        #print('Calculating fluxes')
         with multiprocessing.Pool(nCores) as pool:
             pool.map(parallelFlux, iterInputs)
     # end fluxComputePool()
@@ -689,8 +695,6 @@ class gCombine_Cost:
         # corresponding band numbers (zero-offset)
         bandIDs = [inputs['bandID'] for inputs in iterInputs]
 
-        nBands = len(self.fullBandFluxes)
-
         # clear datasets for modified bands
         for iBand in self.modBand:
             self.modTrialDS['Band{:02d}'.format(iBand+1)] = []
@@ -710,7 +714,7 @@ class gCombine_Cost:
         # flux needs to be in W/m2 and P in mbar
         HEATFAC = 8.4391        
 
-        print('Combining trial fluxes with full-band fluxes')
+        #print('Combining trial fluxes with full-band fluxes')
 
         # trial = g-point combination
         for iBand, trial in zip(bandIDs, bandTrials):
@@ -760,7 +764,8 @@ class gCombine_Cost:
 
                         # add record/forcing dimension
                         modDims = {'record': np.arange(nForce), 
-                            'band': np.arange(nBands), 'pair': np.arange(2)}
+                                   'band': np.arange(self.nBands), 
+                                   'pair': np.arange(2)}
                         outDat = xa.DataArray(
                             [gptLims] * nForce, dims=modDims)
                     elif 'heating_rate' in ncVar:
@@ -817,10 +822,14 @@ class gCombine_Cost:
         Time consuming. Parallizeable?
         """
 
-        print('Calculating cost for each trial')
+        #print('Calculating cost for each trial')
+
+        for cfVar in self.compNameCF: self.costComps[cfVar] = []
 
         with xa.open_dataset(self.lblNC) as lblDS:
             for testDS in self.allTrialDS:
+                # locally, we'll average over profiles AND 
+                # pLevCF, but the object will break down by pLevCF
                 costComps = []
 
                 for cfVar in self.compNameCF:
@@ -844,9 +853,12 @@ class gCombine_Cost:
                     # get array for variable, then compute its test-ref RMS
                     # over all columns at given pressure levels for a given
                     # forcing scenario
-                    cfVar = getattr(subsetErr, cfVar)
+                    cfDA = getattr(subsetErr, cfVar)
+                    self.costComps[cfVar].append(
+                        (cfDA.isel(record=self.iForce)**2).mean(dim=['col']))
+
                     costComps.append(
-                        (cfVar.isel(record=self.iForce)**2).mean(
+                        (cfDA.isel(record=self.iForce)**2).mean(
                         dim=calcDims).values)
                 # end ncVar loop
 
@@ -903,7 +915,9 @@ class gCombine_Cost:
         cpNC = '{}/{}'.format(self.optDir, base)
         shutil.copyfile(optNC, cpNC)
         self.optNC = str(cpNC)
-        print('Saved optimal combination to {}'.format(cpNC))
+        #print('Saved optimal combination to {}'.format(cpNC))
+        print('Optimal combination: {}, Cost: {:.4f}, Trial: {:d}'.format(
+            base, self.totalCost[iOpt], iOpt))
 
         # determine optimal combination and grab g-point combination attribute
         # TO DO: try to preserve more metadata (iteration, band, combined gs) 
@@ -916,6 +930,53 @@ class gCombine_Cost:
         for i in self.gCombine.keys(): print(self.gCombine[i])
         """
     # end findOptimal()
+
+    def costDiagnostics(self):
+        """
+        Write cost components for the current iteration to a netCDF file
+        """
+
+        diagDir = '{}/diagnostics'.format(self.optDir)
+        pathCheck(diagDir, mkdir=True)
+
+        # combine datasets for each cost component and generate a single 
+        # netCDF for each component that contains the component's 
+        # contributions at each level and band
+        # need new lev' (components) dimension
+        outDS = xa.Dataset()
+        for cfVar in self.compNameCF:
+            comp = self.costComps[cfVar]
+            compDS = xa.concat(comp, dim='trial')
+            compVal = compDS.values
+            sumVal = compDS.sum(dim='lev').values
+            sumVal = np.expand_dims(sumVal, axis=1)
+            compSum = np.hstack((compVal, sumVal))
+
+            if 'band' in cfVar:
+                bandIDs = np.array(
+                    [inputs['bandID'] for inputs in self.fluxInputsAll])
+
+                for iBand in range(self.nBands):
+                    dims = ('trials_band{:02d}'.format(iBand+1), 'components')
+                    inBand = np.where(bandIDs == iBand)[0]
+                    outDS['band{:02d}_{}'.format(iBand+1, cfVar)] = \
+                        xa.DataArray(compSum[inBand, :, iBand], dims=dims)
+                # end band loop
+            else:
+                # haven't tested this
+                outDS[cfVar] = xa.DataArray(compSum, dims=dims)
+            # endif band
+        # end cfVar loop
+
+        outDS['total_cost'] = xa.DataArray(self.totalCost, dims=('trial'))
+        outNC = '{}/cost_components_iter{:03d}.nc'.format(
+            diagDir, self.iCombine)
+
+        outDS.attrs['optimal'] = os.path.basename(self.optNC)
+
+        outDS.to_netcdf(outNC)
+        #print('Wrote cost components to {}'.format(outNC))
+    # end costDiagnostics()
 
     def setupNextIter(self):
         """
@@ -931,7 +992,7 @@ class gCombine_Cost:
         if self.cleanup: shutil.rmtree(bandObj.workDir)
 
         # combine g-points for next iteration
-        print('Recombining')
+        #print('Recombining')
         self.iCombine += 1
         newObj = gCombine_kDist(self.optNC, self.optBand, bandObj.doLW, 
             self.iCombine, fullBandKDir=bandObj.fullBandKDir, 
@@ -940,10 +1001,6 @@ class gCombine_Cost:
         self.distBands['band{:02d}'.format(self.optBand+1)] = newObj
         
         # reset cost optimization attributes
-        # TO DO: fluxInputs and trialDS may just need to be *modified* and 
-        # not *cleared* (this will be more efficient)
-        # modBand specifies what band need to be modified to help with this
-        # efficiency improvement
         self.modBand = [int(self.optBand)]
         self.fluxInputsAll = []
         self.allTrialDS = []
@@ -951,6 +1008,7 @@ class gCombine_Cost:
         self.totalCost = []
         self.optBand = None
         self.optNC = None
+        self.costComps = {}
     # end setupNextIter()
 
     def calcOptFlux(self, kRefNC, exeFull=EXEFULL, ncFullProf=NCFULLPROF, 
@@ -1143,9 +1201,9 @@ class gCombine_Cost:
 
         outDS = xa.Dataset.from_dict(dsDict)
         outDS.to_netcdf(outNC)
-        print('Wrote {}'.format(outNC))
+        #print('Wrote {}'.format(outNC))
 
         fluxCompute(outNC, ncFullProf, exeFull, '.', self.optFluxNC)
-        print('Saved new fluxes to {}/{}'.format('.', self.optFluxNC))
+        #print('Saved new fluxes to {}/{}'.format('.', self.optFluxNC))
     # end calcOptFlux()
 # end gCombine_Cost
