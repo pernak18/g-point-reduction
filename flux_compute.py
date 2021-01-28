@@ -67,8 +67,8 @@ CLEANUP = False
 NITER = 1
 
 # cost function variables
-CFCOMPS = ['band_flux_net', 'flux_net']
-CFLEVS = [0, 10000, 102000] # pressure levels of interest in Pa
+CFCOMPS = ['band_flux_up', 'band_flux_dn']
+CFLEVS = [0, 26, 42] # pressure levels of interest in Pa
 CFWGT = [0.5, 0.5]
 
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
@@ -76,14 +76,17 @@ fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
 
 with open('temp.pickle', 'rb') as fp: kBandDict = pickle.load(fp)
 
+CFDIR = 'band_flux_up_down_sfc_tpause_TOA'
+
 coObj = BYBAND.gCombine_Cost(
     kBandDict, fullBandFluxes, REFNC, TESTNC, 
     IFORCING, 1, profilesNC=GARAND, exeRRTMGP=EXE, 
     cleanup=CLEANUP, 
     costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
-    costWeights=CFWGT, test=False)
+    costWeights=CFWGT, test=False, optDir='./{}'.format(CFDIR))
 
-NITER = 2
+NITER = 1
+DIAGNOSTICS = True
 for i in range(1, NITER+1):
     t1 = time.process_time()
 
@@ -109,6 +112,7 @@ for i in range(1, NITER+1):
     print('findOptimal: {:.4f}'.format(time.process_time()-temp))
 
     if coObj.optimized: break
+    if DIAGNOSTICS: coObj.costDiagnostics()
 
     coObj.setupNextIter()
 
