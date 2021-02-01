@@ -210,9 +210,6 @@ class gCombine_kDist:
         # another band; starts off as full band k distribution file
         self.iterNC = str(self.kInNC)
 
-        # the number of g-points in a given comb iter
-        self.nGpt = 16
-
     # end constructor
 
     def kDistBand(self, combine=False):
@@ -590,6 +587,9 @@ class gCombine_Cost:
         self.modTrialDS = {}
         self.allTrialDS = []
 
+        self.cost0 = None
+        self.dCost = []
+        
         # normalization factors defined in normCost() method
         self.norm = []
 
@@ -806,7 +806,7 @@ class gCombine_Cost:
             self.allTrialDS += self.modTrialDS[key]
     # end fluxCombine()
 
-    def costFuncComp(self, normOption=0):
+    def costFuncComp(self, init=False, normOption=0):
         """
         Calculate flexible cost function where RRTMGP-LBLRTM RMS error for
         any number of allowed parameters (usually just flux or HR) over many
@@ -816,6 +816,8 @@ class gCombine_Cost:
             testDS -- xarray Dataset with RRTMGP fluxes
 
         Keywords
+            init -- boolean, evalulate the cost function for the initial, 
+                full g-point k-distribution
             normOption -- int; ID for different normalization techniques
                 (not implemented)
 
@@ -826,8 +828,14 @@ class gCombine_Cost:
 
         for cfVar in self.compNameCF: self.costComps[cfVar] = []
 
+        if init:
+            with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
+        else:
+            allDS = list(self.allTrialDS)
+        # endif init
+
         with xa.open_dataset(self.lblNC) as lblDS:
-            for testDS in self.allTrialDS:
+            for testDS in allDS:
                 # locally, we'll average over profiles AND 
                 # pLevCF, but the object will break down by pLevCF
                 costComps = []
@@ -841,9 +849,7 @@ class gCombine_Cost:
                     # levels closest to user-provided pressure levels
                     # particularly important for heating rate since its
                     # vertical dimension is layers and not levels
-                    # TO DO: confirm this is doing what we expect it to
-                    subsetErr = (testDS-lblDS).sel(
-                        {pStr:self.pLevCF}, method='nearest')
+                    subsetErr = (testDS-lblDS).isel({pStr:self.pLevCF})
 
                     # determine which dimensions over which to average
                     dims = subsetErr[cfVar].dims
@@ -868,7 +874,13 @@ class gCombine_Cost:
                              zip(costComps, self.norm)]
                 totCost = np.sqrt(np.sum([w * c**2 for (w, c) in \
                     zip(self.costWeights, normCosts)])/np.sum(self.costWeights))
-                self.totalCost.append(totCost)
+
+                if init:
+                    self.cost0 = totCost
+                else:
+                    self.totalCost.append(totCost)
+                    self.dCost.append(abs(totCost - self.cost0))
+                # endif init
             # end testDS loop
         # endwith LBLDS
     # end costFuncComp
@@ -881,7 +893,7 @@ class gCombine_Cost:
 
         while True:
             # find optimizal k-distribution
-            iOpt = np.nanargmin(self.totalCost)
+            iOpt = np.nanargmin(self.dCost)
             optNC = self.fluxInputsAll[iOpt]['kNC']
 
             # if no more g-point combining is possible for associated band, 
@@ -896,6 +908,7 @@ class gCombine_Cost:
             self.allTrialDS.pop(iOpt)
             self.norm.pop(iOpt)
             self.totalCost.pop(iOpt)
+            self.dCost.pop(iOpt)
 
             # no more trial to consider
             if len(self.totalCost) == 0:
@@ -1004,6 +1017,8 @@ class gCombine_Cost:
         self.modBand = [int(self.optBand)]
         self.fluxInputsAll = []
         self.allTrialDS = []
+        self.cost0 = None
+        self.dCost = []
         self.norm = []
         self.totalCost = []
         self.optBand = None

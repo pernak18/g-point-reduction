@@ -104,6 +104,7 @@ for i in range(1, NITER+1):
     print('Flux Combine: {:.4f}'.format(time.process_time()-temp))
 
     temp = time.process_time()
+    coObj.costFuncComp(init=True)
     coObj.costFuncComp()
     print('Cost function computation: {:.4f}'.format(time.process_time()-temp))
 
