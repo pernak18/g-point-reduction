@@ -587,7 +587,9 @@ class gCombine_Cost:
         self.modTrialDS = {}
         self.allTrialDS = []
 
+        self.iOpt = None
         self.cost0 = None
+        self.costComp0 = {}
         self.dCost = []
         
         # normalization factors defined in normCost() method
@@ -596,6 +598,7 @@ class gCombine_Cost:
         # cost components -- 1 key per cost variable, values are 
         # nTrial x nCostFuncLevs array 
         self.costComps = {}
+        self.dCostComps = {}
 
         # total cost of combining given g-points; should be one 
         # element per combination
@@ -826,7 +829,10 @@ class gCombine_Cost:
 
         #print('Calculating cost for each trial')
 
-        for cfVar in self.compNameCF: self.costComps[cfVar] = []
+        for cfVar in self.compNameCF:
+            self.costComps[cfVar] = []
+            self.dCostComps[cfVar] = []
+        # end cfVar loop
 
         if init:
             with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
@@ -863,6 +869,11 @@ class gCombine_Cost:
                     self.costComps[cfVar].append(
                         (cfDA.isel(record=self.iForce)**2).mean(dim=['col']))
 
+                    if not init: 
+                        self.dCostComps[cfVar].append(
+                            self.costComps[cfVar][-1]-self.costComp0[cfVar])
+                    # endif init
+
                     costComps.append(
                         (cfDA.isel(record=self.iForce)**2).mean(
                         dim=calcDims).values)
@@ -870,13 +881,20 @@ class gCombine_Cost:
 
                 if not self.norm: self.norm = list(costComps)
 
-                normCosts = [np.sqrt((c).mean())/n for (c, n) in \
-                             zip(costComps, self.norm)]
-                totCost = np.sqrt(np.sum([w * c**2 for (w, c) in \
-                    zip(self.costWeights, normCosts)])/np.sum(self.costWeights))
+                #normCosts = [np.sqrt((c).mean())/n for (c, n) in \
+                #             zip(costComps, self.norm)]
+                totCost = np.sqrt(np.sum([w*c for (w, c) in \
+                    zip(self.costWeights, costComps)])/np.sum(self.costWeights))
 
                 if init:
-                    self.cost0 = totCost
+                    self.cost0 = float(totCost)
+
+                    # if we have an empty dictionary for the initial cost 
+                    # components, assign to it what should be the cost from the 
+                    # full k-distribution (for which 
+                    # there should only be 1 element in the list)
+                    for cfVar in self.compNameCF:
+                        self.costComp0[cfVar] = self.costComps[cfVar][0]
                 else:
                     self.totalCost.append(totCost)
                     self.dCost.append(abs(totCost - self.cost0))
@@ -893,8 +911,8 @@ class gCombine_Cost:
 
         while True:
             # find optimizal k-distribution
-            iOpt = np.nanargmin(self.dCost)
-            optNC = self.fluxInputsAll[iOpt]['kNC']
+            self.iOpt = np.nanargmin(self.dCost)
+            optNC = self.fluxInputsAll[self.iOpt]['kNC']
 
             # if no more g-point combining is possible for associated band, 
             # find the optimization in a different band
@@ -904,11 +922,11 @@ class gCombine_Cost:
 
             # remove trial from consideration if no more g-point combining 
             # is possible
-            self.fluxInputsAll.pop(iOpt)
-            self.allTrialDS.pop(iOpt)
-            self.norm.pop(iOpt)
-            self.totalCost.pop(iOpt)
-            self.dCost.pop(iOpt)
+            self.fluxInputsAll.pop(self.iOpt)
+            self.allTrialDS.pop(self.iOpt)
+            self.norm.pop(self.iOpt)
+            self.totalCost.pop(self.iOpt)
+            self.dCost.pop(self.iOpt)
 
             # no more trial to consider
             if len(self.totalCost) == 0:
@@ -917,7 +935,7 @@ class gCombine_Cost:
             # endif 0
         # end while
 
-        self.optBand = self.fluxInputsAll[iOpt]['bandID']
+        self.optBand = self.fluxInputsAll[self.iOpt]['bandID']
 
         # keep a copy of the optimal k-distribution
         # assuming coefficients_LW_g??-??_iter???.nc convention
@@ -929,8 +947,8 @@ class gCombine_Cost:
         shutil.copyfile(optNC, cpNC)
         self.optNC = str(cpNC)
         #print('Saved optimal combination to {}'.format(cpNC))
-        print('Optimal combination: {}, Cost: {:.4f}, Trial: {:d}'.format(
-            base, self.totalCost[iOpt], iOpt))
+        print('Optimal combination: {}, Delta-Cost: {:.4f}, Trial: {:d}'.format(
+            base, self.dCost[self.iOpt], self.iOpt))
 
         # determine optimal combination and grab g-point combination attribute
         # TO DO: try to preserve more metadata (iteration, band, combined gs) 
@@ -958,8 +976,14 @@ class gCombine_Cost:
         # need new lev' (components) dimension
         outDS = xa.Dataset()
         for cfVar in self.compNameCF:
-            comp = self.costComps[cfVar]
-            compDS = xa.concat(comp, dim='trial')
+            outDS['init_cost_{}'.format(cfVar)] = xa.DataArray(
+                self.costComp0[cfVar], dims=('lev', 'band'))
+
+            #costCompDS = xa.concat(self.costComps[cfVar, dim='trial')
+            outDS['dCost_{}'.format(cfVar)] = \
+                xa.concat(self.dCostComps[cfVar], dim='trial')
+
+            """
             compVal = compDS.values
             sumVal = compDS.sum(dim='lev').values
             sumVal = np.expand_dims(sumVal, axis=1)
@@ -970,18 +994,24 @@ class gCombine_Cost:
                     [inputs['bandID'] for inputs in self.fluxInputsAll])
 
                 for iBand in range(self.nBands):
-                    dims = ('trials_band{:02d}'.format(iBand+1), 'components')
+                    band = 'band{:02d}'.format(iBand+1)
+                    dims = ('trials_{}'.format(band), 'components')
                     inBand = np.where(bandIDs == iBand)[0]
-                    outDS['band{:02d}_{}'.format(iBand+1, cfVar)] = \
+                    outDS[cfVar.replace('band', band)] = \
                         xa.DataArray(compSum[inBand, :, iBand], dims=dims)
                 # end band loop
             else:
                 # haven't tested this
                 outDS[cfVar] = xa.DataArray(compSum, dims=dims)
             # endif band
+            """
+
+            # now grab the cost components from the optimal solution and 
+            # store them for the next iteration
+            self.costComp0[cfVar] = self.costComps[cfVar][self.iOpt]
         # end cfVar loop
 
-        outDS['total_cost'] = xa.DataArray(self.totalCost, dims=('trial'))
+        outDS['trial_total_cost'] = xa.DataArray(self.totalCost, dims=('trial'))
         outNC = '{}/cost_components_iter{:03d}.nc'.format(
             diagDir, self.iCombine)
 
