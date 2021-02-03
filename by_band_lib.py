@@ -867,15 +867,15 @@ class gCombine_Cost:
                     # forcing scenario
                     cfDA = getattr(subsetErr, cfVar)
                     self.costComps[cfVar].append(
-                        (cfDA.isel(record=self.iForce)**2).mean(dim=['col']))
+                        (cfDA.isel(record=self.iForce)**2).sum(dim=['col']))
 
                     if not init: 
                         self.dCostComps[cfVar].append(
-                            self.costComps[cfVar][-1]-self.costComp0[cfVar])
+                            100*self.costComps[cfVar][-1]/self.costComp0[cfVar])
                     # endif init
 
                     costComps.append(
-                        (cfDA.isel(record=self.iForce)**2).mean(
+                        (cfDA.isel(record=self.iForce)**2).sum(
                         dim=calcDims).values)
                 # end ncVar loop
 
@@ -883,11 +883,11 @@ class gCombine_Cost:
 
                 #normCosts = [np.sqrt((c).mean())/n for (c, n) in \
                 #             zip(costComps, self.norm)]
-                totCost = np.sqrt(np.sum([w*c for (w, c) in \
-                    zip(self.costWeights, costComps)])/np.sum(self.costWeights))
+                totCost = np.sum([w*c for (w, c) in \
+                    zip(self.costWeights, costComps)])/np.sum(self.costWeights)
 
                 if init:
-                    self.cost0 = float(totCost)
+                    self.cost0 = totCost
 
                     # if we have an empty dictionary for the initial cost 
                     # components, assign to it what should be the cost from the 
@@ -897,7 +897,7 @@ class gCombine_Cost:
                         self.costComp0[cfVar] = self.costComps[cfVar][0]
                 else:
                     self.totalCost.append(totCost)
-                    self.dCost.append(abs(totCost - self.cost0))
+                    self.dCost.append(100 * totCost / self.cost0)
                 # endif init
             # end testDS loop
         # endwith LBLDS
@@ -947,8 +947,8 @@ class gCombine_Cost:
         shutil.copyfile(optNC, cpNC)
         self.optNC = str(cpNC)
         #print('Saved optimal combination to {}'.format(cpNC))
-        print('Optimal combination: {}, Delta-Cost: {:.4f}, Trial: {:d}'.format(
-            base, self.dCost[self.iOpt], self.iOpt))
+        print('{}, Cost: {:4f}, Delta-Cost: {:.4f}, Trial: {:d}'.format(
+            base, self.totalCost[self.iOpt], self.dCost[self.iOpt], self.iOpt))
 
         # determine optimal combination and grab g-point combination attribute
         # TO DO: try to preserve more metadata (iteration, band, combined gs) 
