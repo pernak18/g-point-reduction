@@ -1,5 +1,6 @@
 import os, sys, shutil
 import subprocess as sub
+import multiprocessing
 
 # "standard" install
 import numpy as np
@@ -39,6 +40,9 @@ WEIGHTS = [
 CFCOMPS = ['flux_net', 'band_flux_net']
 CFLEVS = [0, 26, 42]
 CFWGT = [0.5, 0.5]
+
+# THIS NEEDS TO BE ADJUSTED FOR NERSC! cutting the total nCores in half
+NCORES = multiprocessing.cpu_count() // 2
 
 def pathCheck(path, mkdir=False):
     """
@@ -100,6 +104,111 @@ def fluxCompute(inK, profiles, exe, fluxDir, outFile):
 
     return outDS
 # end fluxCompute()
+
+def combineBands(iBand, fullDS, trialDS):
+    """
+    Combine a given trial fluxes dataset in a given band with the full-band 
+    fluxes from the rest of the bands
+
+    Call
+        outDS = combineBands(iBand, fullDS, trialDS)
+    
+    Input
+        iBand -- int, zero-offset band number that was modified (i.e., 
+            band for which g-points were combined)
+        fullDS -- list of xarray Datasets, full-band fluxes for each 
+            of the bands that were not modified
+        trialDS -- xarray Dataset, fluxes for band where g-points were 
+            combined
+    
+    Output
+        outDS -- xarray Dataset, fluxes for all bands
+    """
+
+    # for flux to HR conversion
+    # flux needs to be in W/m2 and P in mbar
+    HEATFAC = 8.4391        
+
+    nForce = fullDS[0].sizes['record']
+    bandVars = ['flux_up', 'flux_dn', 'flux_net', 
+                'emis_sfc', 'band_lims_wvn']
+    fluxVars = bandVars[:3]
+
+    outDS = xa.Dataset()
+
+    # replace original fluxes for trial band with modified one
+    fluxesMod = list(fullDS)
+    fluxesMod[iBand] = trialDS
+    nBands = len(fullDS)
+
+    # TO DO: consider xarray.merge()
+    ncVars = list(trialDS.keys())
+    for ncVar in ncVars:
+        if ncVar in bandVars:
+            # concat variables on the band dimension
+            modDS = [bandDS[ncVar] for bandDS in fluxesMod]
+            outDat = xa.concat(modDS, 'band')
+
+            # add record/forcing dimension
+            if ncVar == 'emis_sfc':
+                newDims = ('record', 'col', 'band')
+            elif ncVar == 'band_lims_wvn':
+                newDims = ('record', 'band', 'pair')
+                outDat = outDat.expand_dims(
+                    dim={'record': nForce}, axis=0)
+            else:
+                newDims = ('record', 'lev', 'col', 'band')
+            # endif newDims
+
+            outDat = outDat.transpose(*newDims)
+        elif ncVar == 'band_lims_gpt':
+            gptLims = []
+            for iBand, bandDS in enumerate(fluxesMod):
+                bandLims = bandDS['band_lims_gpt'].squeeze()
+                if iBand == 0:
+                    gptLims.append(bandLims)
+                else:
+                    offset = gptLims[-1][1]
+                    gptLims.append(bandLims+offset)
+                # endif iBand
+            # end band loop
+
+            # add record/forcing dimension
+            modDims = {'record': np.arange(nForce), 
+                       'band': np.arange(nBands), 
+                       'pair': np.arange(2)}
+            outDat = xa.DataArray(
+                [gptLims] * nForce, dims=modDims)
+        elif 'heating_rate' in ncVar:
+            continue
+        else:
+            # retain any variables with no band dimension
+            outDat = trialDS[ncVar]
+        # endif ncVar
+
+        outDS[ncVar] = outDat
+    # end ncVar loop
+
+    # calculate broadband fluxes
+    for fluxVar in fluxVars:
+        dimsBB = ('record', 'lev', 'col')
+        outDS = outDS.rename({fluxVar: 'band_{}'.format(fluxVar)})
+        broadband = outDS['band_{}'.format(
+            fluxVar)].sum(dim='band')
+        outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
+    # end fluxVar loop
+
+    dNetBand = outDS['band_flux_net'].diff('lev')
+    dNetBB = outDS['flux_net'].diff('lev')
+    dP = outDS['p_lev'].diff('lev') / 10
+
+    outDS['band_heating_rate'] = xa.DataArray(
+      HEATFAC * dNetBand / dP).swap_dims({'lev': 'lay'})
+    outDS['heating_rate'] = xa.DataArray(
+      HEATFAC * dNetBB / dP).swap_dims({'lev': 'lay'})
+
+    return outDS
+# end combineBands()
 
 class gCombine_kDist:
     def __init__(self, kFile, band, lw, iCombine, 
@@ -662,22 +771,17 @@ class gCombine_Cost:
         Use for parallelization of fluxCompute() calls
         """
 
-        import multiprocessing
-
         # modBand[0] because by now we either are doing all bands or 
         # a single band, but lists are necessary for use with `in` in kMap()
         iterInputs = list(self.fluxInputsAll) if self.iCombine == 1 else \
             list(self.fluxInputsMod['Band{:02d}'.format(self.modBand[0]+1)])
-        iterArgs = [(i['kNC'], i['profiles'], \
-                     i['exe'], i['fluxDir'], i['fluxNC']) for i in iterInputs]
-
-        # THIS NEEDS TO BE ADJUSTED FOR NERSC! cutting the total nCores in half
-        nCores = multiprocessing.cpu_count() // 2
+        argsMap = [(i['kNC'], i['profiles'], \
+                    i['exe'], i['fluxDir'], i['fluxNC']) for i in iterInputs]
 
         # using processes (slower, separate memory) instead of threads
         #print('Calculating fluxes')
-        with multiprocessing.Pool(nCores) as pool:
-            result = pool.starmap_async(fluxCompute, iterArgs)
+        with multiprocessing.Pool(NCORES) as pool:
+            result = pool.starmap_async(fluxCompute, argsMap)
             self.trialDS = result.get()
         # endwith
     # end fluxComputePool()
@@ -711,98 +815,36 @@ class gCombine_Cost:
         for bandNC in self.fullBandFluxes:
             with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
-        nForce = fullDS[0].sizes['record']
-        bandVars = ['flux_up', 'flux_dn', 'flux_net', 
-                    'emis_sfc', 'band_lims_wvn']
-        fluxVars = bandVars[:3]
-
-        # for flux to HR conversion
-        # flux needs to be in W/m2 and P in mbar
-        HEATFAC = 8.4391        
-
         #print('Combining trial fluxes with full-band fluxes')
 
         # trial = g-point combination
+        argsMap = [(iBand, fullDS, trial) for \
+                    iBand, trial in zip(bandIDs, self.trialDS)]
+        with multiprocessing.Pool(NCORES) as pool:
+            result = pool.starmap_async(combineBands, argsMap)
+            resultDS = result.get()
+        # endwith
+
+        for iTrial, iBand in enumerate(bandIDs):
+            bandKey = 'Band{:02d}'.format(iBand+1)
+            self.modTrialDS[bandKey].append(resultDS[iTrial])
+        # end iBand loop
+
+        """
         for iBand, trialDS in zip(bandIDs, self.trialDS):
             if iBand not in self.modBand: continue
             if self.testing and iBand > 0: continue
-            #print('Band {}'.format(iBand+1))
+
             bandKey = 'Band{:02d}'.format(iBand+1)
+            with multiprocessing.Pool(nCores) as pool:
+                result = pool.starmap_async(combineBands, (iBand, fullDS, trialDS))
+                self.modTrialDS[bandKey] = result.get()
+            # endwith
 
-            outDS = xa.Dataset()
-
-            # replace original fluxes for trial band with modified one
-            fluxesMod = list(fullDS)
-            fluxesMod[iBand] = trialDS
-
-            # TO DO: consider xarray.merge()
-            ncVars = list(trialDS.keys())
-            for ncVar in ncVars:
-                if ncVar in bandVars:
-                    # concat variables on the band dimension
-                    modDS = [bandDS[ncVar] for bandDS in fluxesMod]
-                    outDat = xa.concat(modDS, 'band')
-
-                    # add record/forcing dimension
-                    if ncVar == 'emis_sfc':
-                        newDims = ('record', 'col', 'band')
-                    elif ncVar == 'band_lims_wvn':
-                        newDims = ('record', 'band', 'pair')
-                        outDat = outDat.expand_dims(
-                            dim={'record': nForce}, axis=0)
-                    else:
-                        newDims = ('record', 'lev', 'col', 'band')
-                    # endif newDims
-
-                    outDat = outDat.transpose(*newDims)
-                elif ncVar == 'band_lims_gpt':
-                    gptLims = []
-                    for iBand, bandDS in enumerate(fluxesMod):
-                        bandLims = bandDS['band_lims_gpt'].squeeze()
-                        if iBand == 0:
-                            gptLims.append(bandLims)
-                        else:
-                            offset = gptLims[-1][1]
-                            gptLims.append(bandLims+offset)
-                        # endif iBand
-                    # end band loop
-
-                    # add record/forcing dimension
-                    modDims = {'record': np.arange(nForce), 
-                               'band': np.arange(self.nBands), 
-                               'pair': np.arange(2)}
-                    outDat = xa.DataArray(
-                        [gptLims] * nForce, dims=modDims)
-                elif 'heating_rate' in ncVar:
-                    continue
-                else:
-                    # retain any variables with no band dimension
-                    outDat = trialDS[ncVar]
-                # endif ncVar
-
-                outDS[ncVar] = outDat
-            # end ncVar loop
-
-            # calculate broadband fluxes
-            for fluxVar in fluxVars:
-                dimsBB = ('record', 'lev', 'col')
-                outDS = outDS.rename({fluxVar: 'band_{}'.format(fluxVar)})
-                broadband = outDS['band_{}'.format(
-                    fluxVar)].sum(dim='band')
-                outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
-            # end fluxVar loop
-
-            dNetBand = outDS['band_flux_net'].diff('lev')
-            dNetBB = outDS['flux_net'].diff('lev')
-            dP = outDS['p_lev'].diff('lev') / 10
-
-            outDS['band_heating_rate'] = xa.DataArray(
-              HEATFAC * dNetBand / dP).swap_dims({'lev': 'lay'})
-            outDS['heating_rate'] = xa.DataArray(
-              HEATFAC * dNetBB / dP).swap_dims({'lev': 'lay'})
-
-            self.modTrialDS[bandKey].append(outDS)
+            #print('Band {}'.format(iBand+1))
+            
         # end trial loop
+        """
 
         # consolidate fluxCompute inputs for all bands
         for key in sorted(self.modTrialDS.keys()):

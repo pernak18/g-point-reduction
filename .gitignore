@@ -15,3 +15,4 @@ band_k_dist
 workdir_*
 band_*_opt
 temp.pickle
+run_rrtmgp
