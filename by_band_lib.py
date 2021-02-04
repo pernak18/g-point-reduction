@@ -35,10 +35,10 @@ WEIGHTS = [
     0.0022199750, 0.0014140010, 0.0005330000, 0.0000750000
 ]
 
-# default cost function components, levels, weights
-CFCOMPS = ['flux_net', 'heating_rate', 'band_flux_net']
-CFLEVS = [0, 10000, 102000]
-CFWGT = [1., 1., 1., .5]
+# default cost function components, level indices, weights
+CFCOMPS = ['flux_net', 'band_flux_net']
+CFLEVS = [0, 26, 42]
+CFWGT = [0.5, 0.5]
 
 def pathCheck(path, mkdir=False):
     """
@@ -884,7 +884,7 @@ class gCombine_Cost:
 
                     if not init: 
                         self.dCostComps[cfVar].append(
-                            100*self.costComps[cfVar][-1]/self.costComp0[cfVar])
+                            self.costComps[cfVar][-1] - self.costComp0[cfVar])
                     # endif init
 
                     costComps.append(
@@ -979,6 +979,7 @@ class gCombine_Cost:
         Write cost components for the current iteration to a netCDF file
         """
 
+        # scaling factor for standard output and netCDF only
         scale = 100 / self.cost0
 
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
@@ -997,7 +998,6 @@ class gCombine_Cost:
             outDS['init_cost_{}'.format(cfVar)] = xa.DataArray(
                 self.costComp0[cfVar], dims=('lev', 'band')) * scale
 
-            #costCompDS = xa.concat(self.costComps[cfVar, dim='trial')
             outDS['dCost_{}'.format(cfVar)] = \
                 xa.concat(self.dCostComps[cfVar], dim='trial') * scale
 
