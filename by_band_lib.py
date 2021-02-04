@@ -722,7 +722,6 @@ class gCombine_Cost:
 
         #print('Combining trial fluxes with full-band fluxes')
 
-        dimsHR = ('record', 'lay', 'col', 'band')
         # trial = g-point combination
         for iBand, trialDS in zip(bandIDs, self.trialDS):
             if iBand not in self.modBand: continue
@@ -792,18 +791,6 @@ class gCombine_Cost:
                     fluxVar)].sum(dim='band')
                 outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
             # end fluxVar loop
-
-            # calculate heating rates
-            """
-            dNetBand = outDS['band_flux_net'].diff('lev').values
-            dNetBB = outDS['flux_net'].diff('lev').values
-            dP = outDS['p_lev'].diff('lev').values[:,:,:, np.newaxis] / 10
-
-            outDS['band_heating_rate'] = xa.DataArray(
-                HEATFAC * dNetBand / dP, dims=dimsHR)
-            outDS['heating_rate'] = xa.DataArray(
-                HEATFAC * dNetBB / dP, dims=dimsHR)
-            """
 
             dNetBand = outDS['band_flux_net'].diff('lev')
             dNetBB = outDS['flux_net'].diff('lev')
