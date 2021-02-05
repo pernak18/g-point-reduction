@@ -818,8 +818,12 @@ class gCombine_Cost:
         #print('Combining trial fluxes with full-band fluxes')
 
         # trial = g-point combination
-        argsMap = [(iBand, fullDS, trial) for \
-                    iBand, trial in zip(bandIDs, self.trialDS)]
+        argsMap = []
+        for iBand, trial in zip(bandIDs, self.trialDS):
+            if iBand not in self.modBand:continue
+            argsMap.append((iBand, fullDS, trial))
+        # end iBand loop
+
         with multiprocessing.Pool(NCORES) as pool:
             result = pool.starmap_async(combineBands, argsMap)
             resultDS = result.get()
@@ -1070,7 +1074,7 @@ class gCombine_Cost:
         
         # reset cost optimization attributes
         self.modBand = [int(self.optBand)]
-        self.cost0 = self.totalCost[self.iOpt]
+        #self.cost0 = self.totalCost[self.iOpt]
         self.fluxInputsAll = []
         self.combinedDS = []
         self.dCost = []
