@@ -76,7 +76,7 @@ fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
 
 with open('temp.pickle', 'rb') as fp: kBandDict = pickle.load(fp)
 
-CFDIR = 'band_flux_up_down_sfc_tpause_TOA'
+CFDIR = 'sfc_tpause_TOA_band_flux_up_down'
 
 coObj = BYBAND.gCombine_Cost(
     kBandDict, fullBandFluxes, REFNC, TESTNC, 
@@ -85,7 +85,7 @@ coObj = BYBAND.gCombine_Cost(
     costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
     costWeights=CFWGT, test=False, optDir='./{}'.format(CFDIR))
 
-NITER = 1
+NITER = 2
 DIAGNOSTICS = True
 for i in range(1, NITER+1):
     t1 = time.process_time()

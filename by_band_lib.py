@@ -670,16 +670,9 @@ class gCombine_Cost:
 
         # ATTRIBUTES THAT WILL GET RE-ASSIGNED IN OBJECT
 
-        # record of bands that need to be modified (combined)
-        # helpful for efficiency when iter > 1 so trial datasets
-        # are not needlessly duplicated
-        self.modBand = range(16)
-
         # complete list of dictionaries with combinations of 
         # g-points for all bands and their associated flux working 
-        # directories; first have a dictionary with keys for each 
-        # band, then a list of all inputs together
-        self.fluxInputsMod = {}
+        # directories
         self.fluxInputsAll = []
 
         # metadata for keeping track of how g-points were
@@ -692,13 +685,10 @@ class gCombine_Cost:
 
         # list of xarray datasets that combines g-point combination 
         # arrays (self.iBand) with full-band arrays (!= self.iBand)
-        # same idea as flux inputs -- have a full list of datasets
-        # and one with the modified band
-        self.modTrialDS = {}
         self.combinedDS = []
 
         self.iOpt = None
-        self.cost0 = None
+        self.cost0 = []
         self.costComp0 = {}
         self.dCost = []
         
@@ -739,12 +729,9 @@ class gCombine_Cost:
         # then decreases by 1 for every iteration because of g-point combining
         for iBand, band in enumerate(self.bands):
             # only work with band(s) that needs modification
-            if iBand not in self.modBand: continue
+            #if iBand not in self.modBand: continue
             kObj = self.distBands[band]
             bandKey = 'Band{:02d}'.format(iBand+1)
-
-            # if band needs modification, wipe out its current fluxInputs
-            self.fluxInputsMod[bandKey] = []
 
             for nc in kObj.trialNC:
                 # flux directory is same path as netCDF without .nc extension
@@ -754,16 +741,12 @@ class gCombine_Cost:
                 # coefficients files
                 baseNC = os.path.basename(nc).replace('coefficients', 'flux')
                 fluxNC = '{}/{}'.format(fluxDir, baseNC)
-                self.fluxInputsMod[bandKey].append(
+                self.fluxInputsAll.append(
                     {'kNC': nc, 'fluxNC': fluxNC, 
                     'profiles': self.profiles, 'exe': self.exe, 
                     'fluxDir': fluxDir, 'bandID': iBand})
             # end nc loop
         # end band loop
-
-        # consolidate fluxCompute inputs for all bands
-        for key in sorted(self.fluxInputsMod.keys()):
-            self.fluxInputsAll += self.fluxInputsMod[key]
     # end kMap
     
     def fluxComputePool(self):
@@ -771,12 +754,9 @@ class gCombine_Cost:
         Use for parallelization of fluxCompute() calls
         """
 
-        # modBand[0] because by now we either are doing all bands or 
-        # a single band, but lists are necessary for use with `in` in kMap()
-        iterInputs = list(self.fluxInputsAll) if self.iCombine == 1 else \
-            list(self.fluxInputsMod['Band{:02d}'.format(self.modBand[0]+1)])
         argsMap = [(i['kNC'], i['profiles'], \
-                    i['exe'], i['fluxDir'], i['fluxNC']) for i in iterInputs]
+                    i['exe'], i['fluxDir'], i['fluxNC']) for i in \
+                   self.fluxInputsAll]
 
         # using processes (slower, separate memory) instead of threads
         #print('Calculating fluxes')
@@ -797,17 +777,8 @@ class gCombine_Cost:
         Time consuming (~90 seconds per iteration). Parallizeable?
         """
 
-        # either combine datasets for all bands or just the single 
-        # modified band for which new g-points have been combined
-        iterInputs = list(self.fluxInputsAll) if self.iCombine == 1 else \
-            list(self.fluxInputsMod['Band{:02d}'.format(self.modBand[0]+1)])
-
         # corresponding band numbers (zero-offset)
-        bandIDs = [inputs['bandID'] for inputs in iterInputs]
-
-        # clear datasets for modified bands
-        for iBand in self.modBand:
-            self.modTrialDS['Band{:02d}'.format(iBand+1)] = []
+        bandIDs = [inputs['bandID'] for inputs in self.fluxInputsAll]
 
         # open all of the full-band netCDFs as xarray datasets
         # will be combined accordingly with single-band g-point combinations
@@ -820,39 +791,12 @@ class gCombine_Cost:
         # trial = g-point combination
         argsMap = []
         for iBand, trial in zip(bandIDs, self.trialDS):
-            if iBand not in self.modBand:continue
             argsMap.append((iBand, fullDS, trial))
-        # end iBand loop
 
         with multiprocessing.Pool(NCORES) as pool:
             result = pool.starmap_async(combineBands, argsMap)
-            resultDS = result.get()
+            self.combinedDS = result.get()
         # endwith
-
-        for iTrial, iBand in enumerate(bandIDs):
-            bandKey = 'Band{:02d}'.format(iBand+1)
-            self.modTrialDS[bandKey].append(resultDS[iTrial])
-        # end iBand loop
-
-        """
-        for iBand, trialDS in zip(bandIDs, self.trialDS):
-            if iBand not in self.modBand: continue
-            if self.testing and iBand > 0: continue
-
-            bandKey = 'Band{:02d}'.format(iBand+1)
-            with multiprocessing.Pool(nCores) as pool:
-                result = pool.starmap_async(combineBands, (iBand, fullDS, trialDS))
-                self.modTrialDS[bandKey] = result.get()
-            # endwith
-
-            #print('Band {}'.format(iBand+1))
-            
-        # end trial loop
-        """
-
-        # consolidate fluxCompute inputs for all bands
-        for key in sorted(self.modTrialDS.keys()):
-            self.combinedDS += self.modTrialDS[key]
     # end fluxCombine()
 
     def costFuncComp(self, init=False, normOption=0):
@@ -887,7 +831,7 @@ class gCombine_Cost:
         # endif init
 
         with xa.open_dataset(self.lblNC) as lblDS:
-            for testDS in allDS:
+            for iDS, testDS in enumerate(allDS):
                 # locally, we'll average over profiles AND 
                 # pLevCF, but the object will break down by pLevCF
                 costComps = []
@@ -934,7 +878,7 @@ class gCombine_Cost:
                 totCost = np.sum(costComps)
 
                 if init:
-                    self.cost0 = totCost
+                    self.cost0.append(totCost)
 
                     # if we have an empty dictionary for the initial cost 
                     # components, assign to it what should be the cost from the 
@@ -944,7 +888,7 @@ class gCombine_Cost:
                         self.costComp0[cfVar] = self.costComps[cfVar][0]
                 else:
                     self.totalCost.append(totCost)
-                    self.dCost.append(totCost - self.cost0)
+                    self.dCost.append(totCost - self.cost0[-1])
                 # endif init
             # end testDS loop
         # endwith LBLDS
@@ -1013,11 +957,12 @@ class gCombine_Cost:
         """
 
         # scaling factor for standard output and netCDF only
-        scale = 100 / self.cost0
+        scale = 100 / self.cost0[0]
 
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
             os.path.basename(self.optNC), self.iOpt+1, 
-            self.totalCost[self.iOpt]*scale, self.dCost[self.iOpt]*scale))
+            self.totalCost[self.iOpt]*scale, 
+            (self.dCost[self.iOpt]-self.dCost[-1])*scale))
 
         diagDir = '{}/diagnostics'.format(self.optDir)
         pathCheck(diagDir, mkdir=True)
@@ -1028,15 +973,11 @@ class gCombine_Cost:
         # need new lev' (components) dimension
         outDS = xa.Dataset()
         for cfVar in self.compNameCF:
-            outDS['init_cost_{}'.format(cfVar)] = xa.DataArray(
-                self.costComp0[cfVar], dims=('lev', 'band')) * scale
+            outDS['cost_{}'.format(cfVar)] = xa.DataArray(
+                self.costComps[cfVar][self.iOpt], dims=('lev', 'band')) * scale
 
             outDS['dCost_{}'.format(cfVar)] = \
                 xa.concat(self.dCostComps[cfVar], dim='trial') * scale
-
-            # now grab the cost components from the optimal solution and 
-            # store them for the next iteration
-            self.costComp0[cfVar] = self.costComps[cfVar][self.iOpt]
         # end cfVar loop
 
         outDS['trial_total_cost'] = \
@@ -1073,8 +1014,12 @@ class gCombine_Cost:
         self.distBands['band{:02d}'.format(self.optBand+1)] = newObj
         
         # reset cost optimization attributes
-        self.modBand = [int(self.optBand)]
-        #self.cost0 = self.totalCost[self.iOpt]
+        #self.modBand = [int(self.optBand)]
+        self.cost0.append(self.totalCost[self.iOpt])
+        for cfVar in self.compNameCF:
+            self.costComp0[cfVar] = self.costComps[cfVar][self.iOpt]
+        self.fullBandFluxes[int(self.optBand)] = \
+            self.fluxInputsAll[self.iOpt]['fluxNC']
         self.fluxInputsAll = []
         self.combinedDS = []
         self.dCost = []
@@ -1083,6 +1028,12 @@ class gCombine_Cost:
         self.optBand = None
         self.optNC = None
         self.costComps = {}
+
+        # now grab the cost components from the optimal solution and 
+        # store them for the next iteration
+        #for cfVar in self.compNameCF:
+        #    self.costComp0[cfVar] = self.costComps[cfVar][self.iOpt]
+        # end cfVar loop
     # end setupNextIter()
 
     def calcOptFlux(self, kRefNC, exeFull=EXEFULL, ncFullProf=NCFULLPROF, 
