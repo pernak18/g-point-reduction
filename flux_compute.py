@@ -118,6 +118,8 @@ for i in range(1, NITER+1):
     coObj.setupNextIter()
 
     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
+    coObj.calcOptFlux(
+        KFULLNC, fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
 # end iteration loop
 
 t1 = time.process_time()

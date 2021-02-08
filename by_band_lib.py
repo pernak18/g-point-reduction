@@ -1037,7 +1037,8 @@ class gCombine_Cost:
     # end setupNextIter()
 
     def calcOptFlux(self, kRefNC, exeFull=EXEFULL, ncFullProf=NCFULLPROF, 
-                    outNC='rrtmgp-data-lw-g-red.nc'):
+                    kOutNC='rrtmgp-data-lw-g-red.nc', 
+                    fluxOutNC='optimized_fluxes.nc'):
         """
         Once the optimized solution has been found, combine k-distribution
         from each band into single netCDF, then calculate flux for the 
@@ -1225,10 +1226,10 @@ class gCombine_Cost:
         dsDict = {"coords": outCoord, "dims": outDims, "data_vars": outDict}
 
         outDS = xa.Dataset.from_dict(dsDict)
-        outDS.to_netcdf(outNC)
-        #print('Wrote {}'.format(outNC))
+        outDS.to_netcdf(kOutNC)
+        #print('Wrote {}'.format(kOutNC))
 
-        fluxCompute(outNC, ncFullProf, exeFull, '.', self.optFluxNC)
+        fluxCompute(kOutNC, ncFullProf, exeFull, '.', fluxOutNC)
         #print('Saved new fluxes to {}/{}'.format('.', self.optFluxNC))
     # end calcOptFlux()
 # end gCombine_Cost
