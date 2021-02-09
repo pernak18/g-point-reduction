@@ -976,8 +976,9 @@ class gCombine_Cost:
             outDS['cost_{}'.format(cfVar)] = xa.DataArray(
                 self.costComps[cfVar][self.iOpt], dims=('lev', 'band')) * scale
 
+            dCC = self.dCostComps[cfVar]
             outDS['dCost_{}'.format(cfVar)] = \
-                xa.concat(self.dCostComps[cfVar], dim='trial') * scale
+                xa.concat(dCC, dim='trial') - dCC[self.iOpt] * scale
         # end cfVar loop
 
         outDS['trial_total_cost'] = \
