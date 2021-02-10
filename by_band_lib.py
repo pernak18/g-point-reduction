@@ -959,13 +959,18 @@ class gCombine_Cost:
         # scaling factor for standard output and netCDF only
         scale = 100 / self.cost0[0]
 
+        # offset: dCost from previous iteration; only needed for diagnostics
+        dCost0 = self.dCost0 if self.iCombine > 1 else 0
+
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
             os.path.basename(self.optNC), self.iOpt+1, 
             self.totalCost[self.iOpt]*scale, 
-            (self.dCost[self.iOpt]-self.dCost[-1])*scale))
+            (self.dCost[self.iOpt]-dCost0)*scale))
 
         diagDir = '{}/diagnostics'.format(self.optDir)
         pathCheck(diagDir, mkdir=True)
+
+        self.dCost0 = self.dCost[self.iOpt]
 
         # combine datasets for each cost component and generate a single 
         # netCDF for each component that contains the component's 
