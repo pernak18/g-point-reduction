@@ -691,6 +691,7 @@ class gCombine_Cost:
         self.cost0 = []
         self.costComp0 = {}
         self.dCost = []
+        self.dCost0 = None
         
         # normalization factors defined in normCost() method
         self.norm = []
@@ -699,6 +700,7 @@ class gCombine_Cost:
         # nTrial x nCostFuncLevs array 
         self.costComps = {}
         self.dCostComps = {}
+        self.dCostComps0 = {}
 
         # total cost of combining given g-points; should be one 
         # element per combination
@@ -970,8 +972,6 @@ class gCombine_Cost:
         diagDir = '{}/diagnostics'.format(self.optDir)
         pathCheck(diagDir, mkdir=True)
 
-        self.dCost0 = self.dCost[self.iOpt]
-
         # combine datasets for each cost component and generate a single 
         # netCDF for each component that contains the component's 
         # contributions at each level and band
@@ -981,9 +981,9 @@ class gCombine_Cost:
             outDS['cost_{}'.format(cfVar)] = xa.DataArray(
                 self.costComps[cfVar][self.iOpt], dims=('lev', 'band')) * scale
 
-            dCC = self.dCostComps[cfVar]
-            outDS['dCost_{}'.format(cfVar)] = \
-                xa.concat(dCC, dim='trial') - dCC[self.iOpt] * scale
+            dCC0 = self.dCostComps0[cfVar] if self.iCombine > 1 else 0
+            trialDC = xa.concat(self.dCostComps[cfVar], dim='trial')
+            outDS['dCost_{}'.format(cfVar)] = (trialDC - dCC0) * scale
         # end cfVar loop
 
         outDS['trial_total_cost'] = \
@@ -1024,6 +1024,10 @@ class gCombine_Cost:
         self.cost0.append(self.totalCost[self.iOpt])
         for cfVar in self.compNameCF:
             self.costComp0[cfVar] = self.costComps[cfVar][self.iOpt]
+            self.dCostComps0[cfVar] = self.dCostComps[cfVar][self.iOpt]
+        # end cfVar
+
+        self.dCost0 = self.dCost[self.iOpt]
         self.fullBandFluxes[int(self.optBand)] = \
             self.fluxInputsAll[self.iOpt]['fluxNC']
         self.fluxInputsAll = []
@@ -1035,11 +1039,6 @@ class gCombine_Cost:
         self.optNC = None
         self.costComps = {}
 
-        # now grab the cost components from the optimal solution and 
-        # store them for the next iteration
-        #for cfVar in self.compNameCF:
-        #    self.costComp0[cfVar] = self.costComps[cfVar][self.iOpt]
-        # end cfVar loop
     # end setupNextIter()
 
     def calcOptFlux(self, kRefNC, exeFull=EXEFULL, ncFullProf=NCFULLPROF, 
