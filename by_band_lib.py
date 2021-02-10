@@ -841,13 +841,18 @@ class gCombine_Cost:
                 for cfVar in self.compNameCF:
                     # pressure dimension will depend on parameter
                     # layer for HR, level for everything else
-                    pStr = 'lay' if 'heating_rate' in cfVar else 'lev'
+                    if 'heating_rate' in cfVar:
+                        pStr = 'lay'
+                        testDS[cfVar] /= 86400
+                    else:
+                        pStr = 'lev'
+                    # endif scaling
 
                     # Compute differences in all variables in datasets at 
                     # levels closest to user-provided pressure levels
                     # particularly important for heating rate since its
                     # vertical dimension is layers and not levels
-                    subsetErr = (testDS-lblDS).sel({pStr:self.pLevCF})
+                    subsetErr = (testDS-lblDS).isel({pStr:self.pLevCF})
 
                     # determine which dimensions over which to average
                     dims = subsetErr[cfVar].dims
@@ -978,8 +983,10 @@ class gCombine_Cost:
         # need new lev' (components) dimension
         outDS = xa.Dataset()
         for cfVar in self.compNameCF:
+            pStr = 'lay' if 'heat' in cfVar else 'lev'
+            dims = (pStr, 'band') if 'band' in outDS.dims else (pStr)
             outDS['cost_{}'.format(cfVar)] = xa.DataArray(
-                self.costComps[cfVar][self.iOpt], dims=('lev', 'band')) * scale
+                self.costComps[cfVar][self.iOpt], dims=dims) * scale
 
             dCC0 = self.dCostComps0[cfVar] if self.iCombine > 1 else 0
             trialDC = xa.concat(self.dCostComps[cfVar], dim='trial')
