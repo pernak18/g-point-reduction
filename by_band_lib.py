@@ -38,7 +38,9 @@ WEIGHTS = [
 
 # default cost function components, level indices, weights
 CFCOMPS = ['flux_net', 'band_flux_net']
-CFLEVS = [0, 26, 42]
+CFLEVS = {}
+CFLEVS['flux_net'] = [0, 26, 42]
+CFLEVS['band_flux_net'] = [0, 26, 42]
 CFWGT = [0.5, 0.5]
 
 # THIS NEEDS TO BE ADJUSTED FOR NERSC! cutting the total nCores in half
@@ -662,7 +664,7 @@ class gCombine_Cost:
         assert self.nBands == len(self.fullBandFluxes), errMsg
 
         self.compNameCF = list(costFuncComp)
-        self.pLevCF = list(costFuncLevs)
+        self.pLevCF = dict(costFuncLevs)
         self.costWeights = list(costWeights)
 
         self.optDir = str(optDir)
@@ -843,6 +845,9 @@ class gCombine_Cost:
                     # layer for HR, level for everything else
                     if 'heating_rate' in cfVar:
                         pStr = 'lay'
+
+                        # full-band results are in K/s, but by-band
+                        # HRs are in K/day, so we need to convert units
                         testDS[cfVar] /= 86400
                     else:
                         pStr = 'lev'
@@ -852,7 +857,7 @@ class gCombine_Cost:
                     # levels closest to user-provided pressure levels
                     # particularly important for heating rate since its
                     # vertical dimension is layers and not levels
-                    subsetErr = (testDS-lblDS).isel({pStr:self.pLevCF})
+                    subsetErr = (testDS-lblDS).isel({pStr:self.pLevCF[cfVar]})
 
                     # determine which dimensions over which to average
                     dims = subsetErr[cfVar].dims
