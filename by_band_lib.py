@@ -132,9 +132,9 @@ def combineBands(iBand, fullDS, trialDS):
     HEATFAC = 8.4391        
 
     nForce = fullDS[0].sizes['record']
-    bandVars = ['flux_up', 'flux_dn', 'flux_net', 
+    bandVars = ['flux_up', 'flux_dn', 'flux_net', 'heating_rate', 
                 'emis_sfc', 'band_lims_wvn']
-    fluxVars = bandVars[:3]
+    fluxVars = bandVars[:4]
 
     outDS = xa.Dataset()
 
@@ -159,7 +159,13 @@ def combineBands(iBand, fullDS, trialDS):
                 outDat = outDat.expand_dims(
                     dim={'record': nForce}, axis=0)
             else:
-                newDims = ('record', 'lev', 'col', 'band')
+                if ncVar == 'heating_rate':
+                    pDim = 'lay'
+                else:
+                    pDim = 'lev'
+                # endif HR
+
+                newDims = ('record', pDim, 'col', 'band')
             # endif newDims
 
             outDat = outDat.transpose(*newDims)
@@ -181,8 +187,8 @@ def combineBands(iBand, fullDS, trialDS):
                        'pair': np.arange(2)}
             outDat = xa.DataArray(
                 [gptLims] * nForce, dims=modDims)
-        elif 'heating_rate' in ncVar:
-            continue
+        #elif 'heating_rate' in ncVar:
+        #    continue
         else:
             # retain any variables with no band dimension
             outDat = trialDS[ncVar]
@@ -193,13 +199,15 @@ def combineBands(iBand, fullDS, trialDS):
 
     # calculate broadband fluxes
     for fluxVar in fluxVars:
-        dimsBB = ('record', 'lev', 'col')
+        pDim = 'lay' if 'heating_rate' in fluxVar else 'lev'
+        dimsBB = ('record', pDim, 'col')
         outDS = outDS.rename({fluxVar: 'band_{}'.format(fluxVar)})
         broadband = outDS['band_{}'.format(
             fluxVar)].sum(dim='band')
         outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
     # end fluxVar loop
 
+    """
     dNetBand = outDS['band_flux_net'].diff('lev')
     dNetBB = outDS['flux_net'].diff('lev')
     dP = outDS['p_lev'].diff('lev') / 10
@@ -208,6 +216,7 @@ def combineBands(iBand, fullDS, trialDS):
       HEATFAC * dNetBand / dP).swap_dims({'lev': 'lay'})
     outDS['heating_rate'] = xa.DataArray(
       HEATFAC * dNetBB / dP).swap_dims({'lev': 'lay'})
+    """
 
     return outDS
 # end combineBands()
@@ -691,18 +700,18 @@ class gCombine_Cost:
 
         self.iOpt = None
         self.cost0 = []
-        self.costComp0 = {}
         self.dCost = []
-        self.dCost0 = None
         
         # normalization factors defined in normCost() method
         self.norm = []
 
         # cost components -- 1 key per cost variable, values are 
-        # nTrial x nCostFuncLevs array 
+        # nTrial x nCostFuncLevs array; for diagnostics
+        self.costComp0 = {}
         self.costComps = {}
-        self.dCostComps = {}
         self.dCostComps0 = {}
+        self.dCostComps = {}
+        self.dCost0 = None
 
         # total cost of combining given g-points; should be one 
         # element per combination
@@ -976,8 +985,8 @@ class gCombine_Cost:
 
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
             os.path.basename(self.optNC), self.iOpt+1, 
-            self.totalCost[self.iOpt]*scale, 
-            (self.dCost[self.iOpt]-dCost0)*scale))
+            self.totalCost[self.iOpt] * scale, 
+            (self.dCost[self.iOpt] - dCost0) * scale))
 
         diagDir = '{}/diagnostics'.format(self.optDir)
         pathCheck(diagDir, mkdir=True)
