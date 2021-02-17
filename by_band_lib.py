@@ -775,6 +775,8 @@ class gCombine_Cost:
         #print('Calculating fluxes')
         with multiprocessing.Pool(NCORES) as pool:
             result = pool.starmap_async(fluxCompute, argsMap)
+            # TO DO: is order preserved?
+            # https://stackoverflow.com/a/57725895 => yes
             self.trialDS = result.get()
         # endwith
     # end fluxComputePool()
@@ -786,8 +788,6 @@ class gCombine_Cost:
 
         Heating rates and broadband fluxes are computed in this method
         rather than using the RRTMGP calculations
-        
-        Time consuming (~90 seconds per iteration). Parallizeable?
         """
 
         # corresponding band numbers (zero-offset)
@@ -808,6 +808,8 @@ class gCombine_Cost:
 
         with multiprocessing.Pool(NCORES) as pool:
             result = pool.starmap_async(combineBands, argsMap)
+            # TO DO: is order preserved?
+            # https://stackoverflow.com/a/57725895 => yes
             self.combinedDS = result.get()
         # endwith
     # end fluxCombine()
@@ -857,7 +859,7 @@ class gCombine_Cost:
 
                         # full-band results are in K/s, but by-band
                         # HRs are in K/day, so we need to convert units
-                        testDS[cfVar] /= 86400
+                        testDS[cfVar] *= 86400
                     else:
                         pStr = 'lev'
                     # endif scaling
