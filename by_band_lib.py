@@ -107,7 +107,7 @@ def fluxCompute(inK, profiles, exe, fluxDir, outFile):
     return outDS
 # end fluxCompute()
 
-def combineBands(iBand, fullDS, trialDS):
+def combineBands(iBand, fullDS, trialDS, finalDS=False):
     """
     Combine a given trial fluxes dataset in a given band with the full-band 
     fluxes from the rest of the bands
@@ -140,7 +140,7 @@ def combineBands(iBand, fullDS, trialDS):
 
     # replace original fluxes for trial band with modified one
     fluxesMod = list(fullDS)
-    fluxesMod[iBand] = trialDS
+    if not finalDS: fluxesMod[iBand] = trialDS
     nBands = len(fullDS)
 
     # TO DO: consider xarray.merge()
@@ -1061,7 +1061,6 @@ class gCombine_Cost:
         self.optBand = None
         self.optNC = None
         self.costComps = {}
-
     # end setupNextIter()
 
     def calcOptFlux(self, kRefNC, exeFull=EXEFULL, ncFullProf=NCFULLPROF, 
@@ -1075,6 +1074,13 @@ class gCombine_Cost:
         TO DO: CLEAN THIS THE EFF UP!!!
         """
 
+        fullDS = []
+        for bandNC in self.fullBandFluxes:
+            with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
+
+        finalDS = combineBands(0, fullDS, fullDS[0], finalDS=True)
+        finalDS.to_netcdf(fluxOutNC)
+        return
         ncFiles = [self.distBands[key].kInNC for key in self.distBands.keys()]
 
         # wanna do an xarray.merge(), but it's not that simple
