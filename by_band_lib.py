@@ -844,7 +844,7 @@ class gCombine_Cost:
 
                         # full-band results are in K/s, but by-band
                         # HRs are in K/day, so we need to convert units
-                        testDS[cfVar] *= 86400
+                        #testDS[cfVar] *= 86400
                     else:
                         pStr = 'lev'
                     # endif scaling
