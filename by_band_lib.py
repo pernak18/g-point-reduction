@@ -980,7 +980,6 @@ class gCombine_Cost:
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
             os.path.basename(self.optNC), self.iOpt+1, 
             self.totalCost[self.iOpt], (self.dCost[self.iOpt] - dCost0)))
-        print('Cost Function Components: (weight, cost contribution)')
 
         diagDir = '{}/diagnostics'.format(self.optDir)
         pathCheck(diagDir, mkdir=True)
@@ -990,7 +989,8 @@ class gCombine_Cost:
         # contributions at each level and band
         # need new lev' (components) dimension
         outDS = xa.Dataset()
-        for weight, comp in zip(self.costWeights, self.compNameCF):
+        contribs = []
+        for comp in self.compNameCF:
             # scaling factor for more meaningful metrics
             scale = 100 / self.cost0[comp][0]
 
@@ -1007,9 +1007,15 @@ class gCombine_Cost:
             trialDC = xa.concat(self.dCostComps[comp], dim='trial')
             outDS['dCost_{}'.format(comp)] = (trialDC - dCC0) * scale
 
-            print('\t{}: ({:.2f}, {:.4f})'.format(
-                comp, weight, contrib.sum().values))
+            contribs.append(contrib.sum().values)
         # end comp loop
+
+        outComp, outContrib = [], []
+        for iComp, comp in enumerate(self.compNameCF):
+            outComp.append(comp)
+            outContrib.append('{:.4f}'.format(contribs[iComp]))
+        # end comp loop
+        print('\t{} = {}'.format(', '.join(outComp), ', '.join(outContrib)))
 
         outDS['trial_total_cost'] = \
             xa.DataArray(self.totalCost, dims=('trial'))
