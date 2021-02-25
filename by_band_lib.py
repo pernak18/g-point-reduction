@@ -657,9 +657,18 @@ class gCombine_Cost:
         errMsg = 'Inconsistent k-distributions and fluxes'
         assert self.nBands == len(self.fullBandFluxes), errMsg
 
-        self.compNameCF = list(costFuncComp)
-        self.pLevCF = dict(costFuncLevs)
-        self.costWeights = list(costWeights)
+        self.compNameCF = list(costFuncComp); nComp = len(costFuncComp)
+        self.pLevCF = dict(costFuncLevs); nLev = len(costFuncLevs.keys())
+        self.costWeights = list(costWeights); nWgt = len(costWeights)
+
+        if not (nComp == nLev == nWgt):
+            print('# of components: {}'.format(nComp))
+            print('# of level fields: {}'.format(nLev))
+            print('# of weights: {}'.format(nWgt))
+            print('Number of cost components, level fields, ', end='')
+            print('and weights must be equal. Please try again')
+            sys.exit(1)
+        # endif n
 
         self.optDir = str(optDir)
         pathCheck(self.optDir, mkdir=True)
@@ -684,8 +693,14 @@ class gCombine_Cost:
         self.combinedDS = []
 
         self.iOpt = None
-        self.cost0 = []
         self.dCost = []
+
+        self.cost0 = {}
+        self.dCost0 = {}
+        for comp in self.compNameCF:
+            self.cost0[comp] = []
+            self.dCost0[comp] = []
+        # end comp loop
         
         # normalization factors defined in normCost() method
         self.norm = []
@@ -696,7 +711,6 @@ class gCombine_Cost:
         self.costComps = {}
         self.dCostComps0 = {}
         self.dCostComps = {}
-        self.dCost0 = None
 
         # total cost of combining given g-points; should be one 
         # element per combination
@@ -819,10 +833,12 @@ class gCombine_Cost:
 
         #print('Calculating cost for each trial')
 
-        for cfVar in self.compNameCF:
-            self.costComps[cfVar] = []
-            self.dCostComps[cfVar] = []
-        # end cfVar loop
+        for comp in self.compNameCF:
+            # locally, we'll average over profiles AND pLevCF, but 
+            # the object will break down by pLevCF for diagnostics
+            self.costComps[comp] = []
+            self.dCostComps[comp] = []
+        # end comp loop
 
         if init:
             with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
@@ -832,71 +848,60 @@ class gCombine_Cost:
 
         with xa.open_dataset(self.lblNC) as lblDS:
             for iDS, testDS in enumerate(allDS):
-                # locally, we'll average over profiles AND 
-                # pLevCF, but the object will break down by pLevCF
-                costComps = []
+                allComps = []
 
-                for cfVar in self.compNameCF:
+                for comp, weight in zip(self.compNameCF, self.costWeights):
                     # pressure dimension will depend on parameter
                     # layer for HR, level for everything else
-                    if 'heating_rate' in cfVar:
-                        pStr = 'lay'
+                    pStr = 'lay' if 'heating_rate' in comp else 'lev'
 
-                        # full-band results are in K/s, but by-band
-                        # HRs are in K/day, so we need to convert units
-                        #testDS[cfVar] *= 86400
-                    else:
-                        pStr = 'lev'
-                    # endif scaling
+                    # normalize to get HR an fluxes on same scale
+                    # so each cost component has its own scale to 100
+                    scale = 1 if init else weight * 100 / self.cost0[comp][0]
 
                     # Compute differences in all variables in datasets at 
                     # levels closest to user-provided pressure levels
                     # particularly important for heating rate since its
                     # vertical dimension is layers and not levels
-                    subsetErr = (testDS-lblDS).isel({pStr:self.pLevCF[cfVar]})
+                    subsetErr = (testDS-lblDS).isel({pStr:self.pLevCF[comp]})
 
                     # determine which dimensions over which to average
-                    dims = subsetErr[cfVar].dims
+                    dims = subsetErr[comp].dims
                     calcDims = ['col', pStr]
                     if 'band' in dims: calcDims.append('band')
 
                     # get array for variable, then compute its test-ref RMS
                     # over all columns at given pressure levels for a given
                     # forcing scenario
-                    cfDA = getattr(subsetErr, cfVar)
-                    self.costComps[cfVar].append(
-                        (cfDA.isel(record=self.iForce)**2).sum(dim=['col']))
+                    cfDA = getattr(subsetErr, comp).isel(record=self.iForce)**2
 
-                    if not init: 
-                        self.dCostComps[cfVar].append(
-                            self.costComps[cfVar][-1] - self.costComp0[cfVar])
+                    # components will be scaled by their own initial cost
+                    self.costComps[comp].append(cfDA.sum(dim=['col']))
+
+                    # total cost (sum of compCosts) will be scaled to 100
+                    # WRT initial cost to keep HR and Flux in same range
+                    compCost = cfDA.sum(dim=calcDims).values * scale
+                    allComps.append(np.sum(compCost))
+                    if not init:
+                        self.dCostComps[comp].append(
+                            (self.costComps[comp][-1] - self.costComp0[comp]))
                     # endif init
-
-                    costComps.append(
-                        (cfDA.isel(record=self.iForce)**2).sum(
-                        dim=calcDims).values)
                 # end ncVar loop
 
-                if not self.norm: self.norm = list(costComps)
-
-                #normCosts = [np.sqrt((c).mean())/n for (c, n) in \
-                #             zip(costComps, self.norm)]
-                #totCost = np.sum([w*n for (w, n) in \
-                #    zip(self.costWeights, normCosts)])/np.sum(self.costWeights)
-                totCost = np.sum(costComps)
+                allComps = np.array(allComps)
 
                 if init:
-                    self.cost0.append(totCost)
-
                     # if we have an empty dictionary for the initial cost 
                     # components, assign to it what should be the cost from the 
                     # full k-distribution (for which 
                     # there should only be 1 element in the list)
-                    for cfVar in self.compNameCF:
-                        self.costComp0[cfVar] = self.costComps[cfVar][0]
+                    for iComp, comp in enumerate(self.compNameCF):
+                        self.cost0[comp].append(allComps[iComp])
+                        self.costComp0[comp] = self.costComps[comp][0]
                 else:
-                    self.totalCost.append(totCost)
-                    self.dCost.append(totCost - self.cost0[-1])
+                    totalCost = allComps.sum()
+                    self.totalCost.append(totalCost)
+                    self.dCost.append(totalCost - 100)
                 # endif init
             # end testDS loop
         # endwith LBLDS
@@ -964,16 +969,17 @@ class gCombine_Cost:
         Write cost components for the current iteration to a netCDF file
         """
 
-        # scaling factor for standard output and netCDF only
-        scale = 100 / self.cost0[0]
-
         # offset: dCost from previous iteration; only needed for diagnostics
-        dCost0 = self.dCost0 if self.iCombine > 1 else 0
+        if self.iCombine > 1:
+            dCost0 = [self.dCost0[comp][-1] for comp in self.compNameCF]
+            dCost0 = sum(dCost0)
+        else:
+            dCost0 = 0
+        # endif iCombine
 
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
             os.path.basename(self.optNC), self.iOpt+1, 
-            self.totalCost[self.iOpt] * scale, 
-            (self.dCost[self.iOpt] - dCost0) * scale))
+            self.totalCost[self.iOpt], (self.dCost[self.iOpt] - dCost0)))
 
         diagDir = '{}/diagnostics'.format(self.optDir)
         pathCheck(diagDir, mkdir=True)
@@ -983,23 +989,26 @@ class gCombine_Cost:
         # contributions at each level and band
         # need new lev' (components) dimension
         outDS = xa.Dataset()
-        for cfVar in self.compNameCF:
-            pStr = 'lay' if 'heat' in cfVar else 'lev'
-            dims = (pStr, 'band') if 'band' in cfVar else (pStr)
+        for comp in self.compNameCF:
+            # scaling factor for more meaningful metrics
+            scale = 100 / self.cost0[comp][0]
 
-            outDS['cost0_{}'.format(cfVar)] = xa.DataArray(
-                self.costComp0[cfVar], dims=dims) * scale
+            pStr = 'lay' if 'heat' in comp else 'lev'
+            dims = (pStr, 'band') if 'band' in comp else (pStr)
 
-            outDS['cost_{}'.format(cfVar)] = xa.DataArray(
-                self.costComps[cfVar][self.iOpt], dims=dims) * scale
+            outDS['cost0_{}'.format(comp)] = xa.DataArray(
+                self.costComp0[comp] * scale, dims=dims)
 
-            dCC0 = self.dCostComps0[cfVar] if self.iCombine > 1 else 0
-            trialDC = xa.concat(self.dCostComps[cfVar], dim='trial')
-            outDS['dCost_{}'.format(cfVar)] = (trialDC - dCC0) * scale
-        # end cfVar loop
+            outDS['cost_{}'.format(comp)] = xa.DataArray(
+                self.costComps[comp][self.iOpt] * scale, dims=dims)
+
+            dCC0 = self.dCostComps0[comp] if self.iCombine > 1 else 0
+            trialDC = xa.concat(self.dCostComps[comp], dim='trial')
+            outDS['dCost_{}'.format(comp)] = (trialDC - dCC0) * scale
+        # end comp loop
 
         outDS['trial_total_cost'] = \
-            xa.DataArray(self.totalCost, dims=('trial')) * scale
+            xa.DataArray(self.totalCost, dims=('trial'))
         outNC = '{}/cost_components_iter{:03d}.nc'.format(
             diagDir, self.iCombine)
 
@@ -1033,13 +1042,16 @@ class gCombine_Cost:
         
         # reset cost optimization attributes
         #self.modBand = [int(self.optBand)]
-        self.cost0.append(self.totalCost[self.iOpt])
-        for cfVar in self.compNameCF:
-            self.costComp0[cfVar] = self.costComps[cfVar][self.iOpt]
-            self.dCostComps0[cfVar] = self.dCostComps[cfVar][self.iOpt]
-        # end cfVar
+        for weight, comp in zip(self.costWeights, self.compNameCF):
+            pStr = 'lay' if 'heating_rate' in comp else 'lev'
 
-        self.dCost0 = self.dCost[self.iOpt]
+            scale = weight * 100 / self.cost0[comp][0]
+            self.costComp0[comp] = self.costComps[comp][self.iOpt]
+            self.dCostComps0[comp] = self.dCostComps[comp][self.iOpt]
+            self.cost0[comp].append(self.costComp0[comp].sum().values * scale)
+            self.dCost0[comp].append(self.dCostComps0[comp].sum().values * scale)
+        # end comp loop
+
         self.fullBandFluxes[int(self.optBand)] = \
             self.fluxInputsAll[self.iOpt]['fluxNC']
         self.fluxInputsAll = []
