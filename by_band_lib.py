@@ -928,7 +928,7 @@ class gCombine_Cost:
             # is possible
             self.fluxInputsAll.pop(self.iOpt)
             self.combinedDS.pop(self.iOpt)
-            self.norm.pop(self.iOpt)
+            #self.norm.pop(self.iOpt)
             self.totalCost.pop(self.iOpt)
             self.dCost.pop(self.iOpt)
 
