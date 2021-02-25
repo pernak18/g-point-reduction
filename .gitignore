@@ -14,5 +14,5 @@ full_band_flux
 band_k_dist
 workdir_*
 band_*_opt
-temp.pickle
+*.pickle
 run_rrtmgp
