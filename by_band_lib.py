@@ -857,25 +857,40 @@ class gCombine_Cost:
                     # layer for HR, level for everything else
                     pStr = 'lay' if 'heating_rate' in comp else 'lev'
 
-                    # normalize to get HR an fluxes on same scale
-                    # so each cost component has its own scale to 100
-                    scale = 1 if init else weight * 100 / self.cost0[comp][0]
+                    iForce = self.iForce[comp]
+                    selDict = {'record': 0, pStr: self.pLevCF[comp]}
+                    if iForce == 0:
+                        # Compute differences in all variables in datasets at 
+                        # levels closest to user-provided pressure levels
+                        # particularly important for heating rate since its
+                        # vertical dimension is layers and not levels
+                        subsetErr = (testDS-lblDS).isel(selDict)
+                    else:
+                        # extract baseline and forcing scenarios
+                        bTest = testDS.isel(selDict)
+                        bLBL = lblDS.isel(selDict)
 
-                    # Compute differences in all variables in datasets at 
-                    # levels closest to user-provided pressure levels
-                    # particularly important for heating rate since its
-                    # vertical dimension is layers and not levels
-                    subsetErr = (testDS-lblDS).isel({pStr:self.pLevCF[comp]})
+                        selDict['record'] = iForce
+                        fTest = testDS.isel(selDict)
+                        fLBL = lblDS.isel(selDict)
+                        testDSf = fTest - bTest
+                        lblDSf = fLBL - bLBL
+                        subsetErr = testDSf-lblDSf
+                    # endif forcing
+
+                    # get array for variable, then compute its test-ref RMS
+                    # over all columns at given pressure levels for a given
+                    # forcing scenario
+                    cfDA = getattr(subsetErr, comp)**2
 
                     # determine which dimensions over which to average
                     dims = subsetErr[comp].dims
                     calcDims = ['col', pStr]
                     if 'band' in dims: calcDims.append('band')
 
-                    # get array for variable, then compute its test-ref RMS
-                    # over all columns at given pressure levels for a given
-                    # forcing scenario
-                    cfDA = getattr(subsetErr, comp).isel(record=0)**2
+                    # normalize to get HR an fluxes on same scale
+                    # so each cost component has its own scale to 100
+                    scale = 1 if init else weight * 100 / self.cost0[comp][0]
 
                     # components will be scaled by their own initial cost
                     self.costComps[comp].append(cfDA.sum(dim=['col']))
