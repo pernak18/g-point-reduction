@@ -857,34 +857,35 @@ class gCombine_Cost:
                     # layer for HR, level for everything else
                     pStr = 'lay' if 'heating_rate' in comp else 'lev'
 
-                    iForce = self.iForce[comp]
                     selDict = {'record': 0, pStr: self.pLevCF[comp]}
-                    if iForce == 0:
-                        # Compute differences in all variables in datasets at 
-                        # levels closest to user-provided pressure levels
-                        # particularly important for heating rate since its
-                        # vertical dimension is layers and not levels
-                        subsetErr = (testDS-lblDS).isel(selDict)
-                    else:
+                    if 'forcing' in comp:
                         # extract baseline and forcing scenarios
                         bTest = testDS.isel(selDict)
                         bLBL = lblDS.isel(selDict)
 
-                        selDict['record'] = iForce
+                        selDict['record'] = self.iForce[comp]
                         fTest = testDS.isel(selDict)
                         fLBL = lblDS.isel(selDict)
                         testDSf = fTest - bTest
                         lblDSf = fLBL - bLBL
                         subsetErr = testDSf-lblDSf
+                        compDS = comp.replace('_forcing', '')
+                    else:
+                        # Compute differences in all variables in datasets at 
+                        # levels closest to user-provided pressure levels
+                        # particularly important for heating rate since its
+                        # vertical dimension is layers and not levels
+                        subsetErr = (testDS-lblDS).isel(selDict)
+                        compDS = str(comp)
                     # endif forcing
 
                     # get array for variable, then compute its test-ref RMS
                     # over all columns at given pressure levels for a given
                     # forcing scenario
-                    cfDA = getattr(subsetErr, comp)**2
+                    cfDA = getattr(subsetErr, compDS)**2
 
                     # determine which dimensions over which to average
-                    dims = subsetErr[comp].dims
+                    dims = subsetErr[compDS].dims
                     calcDims = ['col', pStr]
                     if 'band' in dims: calcDims.append('band')
 
