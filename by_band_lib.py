@@ -857,9 +857,10 @@ class gCombine_Cost:
                     # layer for HR, level for everything else
                     pStr = 'lay' if 'heating_rate' in comp else 'lev'
 
-                    selDict = {'record': 0, pStr: self.pLevCF[comp]}
                     if 'forcing' in comp:
                         # extract baseline and forcing scenarios
+                        # baseline is record 1 (Preindustrial)
+                        selDict = {'record': 1, pStr: self.pLevCF[comp]}
                         bTest = testDS.isel(selDict)
                         bLBL = lblDS.isel(selDict)
 
@@ -875,6 +876,8 @@ class gCombine_Cost:
                         # levels closest to user-provided pressure levels
                         # particularly important for heating rate since its
                         # vertical dimension is layers and not levels
+                        # baseline is record 0 (Garand Present Day)
+                        selDict = {'record': 0, pStr: self.pLevCF[comp]}
                         subsetErr = (testDS-lblDS).isel(selDict)
                         compDS = str(comp)
                     # endif forcing
