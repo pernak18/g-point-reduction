@@ -880,9 +880,21 @@ class gCombine_Cost:
                         # particularly important for heating rate since its
                         # vertical dimension is layers and not levels
                         # baseline is record 0 (Garand Present Day)
-                        selDict = {'record': 0, pStr: self.pLevCF[comp]}
+                        try:
+                            # allow for different atmospheric specs 
+                            # (PI, PI 2xCH4) to be requested using the 
+                            # "param_N" convention with "N" being the forcing
+                            # scenario index
+                            iForce = int(comp.split('_')[-1])
+                            compDS = comp.replace('_{}'.format(iForce), '')
+                        except:
+                            # default to present day Garand atm specs
+                            iForce = 0
+                            compDS = str(comp)
+                        # stop trying
+
+                        selDict = {'record': iForce, pStr: self.pLevCF[comp]}
                         subsetErr = (testDS-lblDS).isel(selDict)
-                        compDS = str(comp)
                     # endif forcing
 
                     # get array for variable, then compute its test-ref RMS

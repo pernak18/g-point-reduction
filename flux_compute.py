@@ -69,7 +69,7 @@ CLEANUP = False
 NITER = 1
 
 CFCOMPS = ['band_flux_up', 'band_flux_dn']
-CFCOMPS = ['heating_rate', 'flux_net', 'flux_net_forcing']
+CFCOMPS = ['heating_rate', 'flux_net', 'flux_net_forcing_2']
 
 # level indices for each component 
 # (e.g., 0 for surface, 41 for Garand TOA)
@@ -105,8 +105,7 @@ if RESTORE:
 else:
     coObj = BYBAND.gCombine_Cost(
         kBandDict, fullBandFluxes, REFNC, TESTNC, 
-        IFORCING, 1, profilesNC=GARAND, exeRRTMGP=EXE, 
-        cleanup=CLEANUP, 
+        1, profilesNC=GARAND, exeRRTMGP=EXE, cleanup=CLEANUP, 
         costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
         costWeights=CFWGT, test=False, optDir='./{}'.format(CFDIR))
 # endif RESTORE
