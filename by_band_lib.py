@@ -584,8 +584,7 @@ class gCombine_kDist:
 
 class gCombine_Cost:
     def __init__(self, bandDict, fullBandFluxes, 
-                fluxesLBL, fluxesRRTMGP, 
-                idxForce, iCombine,
+                fluxesLBL, fluxesRRTMGP, iCombine,
                 profilesNC=GARAND, exeRRTMGP=EXE, 
                 cleanup=False, 
                 costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
@@ -611,9 +610,6 @@ class gCombine_Cost:
                 each band without any g-point reduction
             fluxesLBL -- string, path to LBLRTM flux netCDF file
             fluxesRRTMGP -- string, path to RRTMGP flux netCDF file
-            idxForce -- dictionary with key for each cost function component
-                values are indices of associated forcing scenario for 
-                each component
             iCombine -- int, index for what iteration of g-point combining is
                 underway
 
@@ -642,7 +638,6 @@ class gCombine_Cost:
         self.distBands = dict(bandDict)
         self.lblNC = str(fluxesLBL)
         self.rrtmgpNC = str(fluxesRRTMGP)
-        self.iForce = dict(idxForce)
         self.iCombine = int(iCombine)
         self.profiles = str(profilesNC)
         self.exe = str(exeRRTMGP)
@@ -863,14 +858,22 @@ class gCombine_Cost:
                         selDict = {'record': 1, pStr: self.pLevCF[comp]}
                         bTest = testDS.isel(selDict)
                         bLBL = lblDS.isel(selDict)
+                        
+                        # assuming comp is following '*_forcing_N' where 
+                        # * is the parameter (flux_net, heating_rate, etc.), 
+                        # N is the forcing record index
+                        iForce = int(comp.split('_')[-1])
 
-                        selDict['record'] = self.iForce[comp]
+                        # calculate forcing
+                        selDict['record'] = int(iForce)
                         fTest = testDS.isel(selDict)
                         fLBL = lblDS.isel(selDict)
                         testDSf = fTest - bTest
                         lblDSf = fLBL - bLBL
                         subsetErr = testDSf-lblDSf
-                        compDS = comp.replace('_forcing', '')
+
+                        # what parameter are we extracting from netCDF?
+                        compDS = comp.replace('_forcing_{}'.format(iForce), '')
                     else:
                         # Compute differences in all variables in datasets at 
                         # levels closest to user-provided pressure levels
