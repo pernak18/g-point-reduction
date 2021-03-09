@@ -37,6 +37,11 @@ GARAND = '{}/multi_garand_template_single_band.nc'.format(REFDIR)
 # test (RRTMGP) and reference (LBL) flux netCDF files
 TESTNC = '{}/rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
 REFNC = '{}/lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
+
+#REFDIR = '/project/projectdirs/e3sm/pernak18/reference_netCDF'
+#TESTNC = '{}/profile-stats-plots/rrtmgp-lw-flux-inputs-outputs-garand-all.nc'.format(REFDIR)
+#TESTNC = '{}/g-point-reduce/rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
+
 PATHS = [KFULLNC, EXE, TESTNC, REFNC, GARAND]
 
 BANDSPLITDIR = 'band_k_dist'
@@ -52,9 +57,6 @@ DOSW = not DOLW
 DOMAIN = 'LW' if DOLW else 'SW'
 NBANDS = 16 if DOLW else 14
 
-# forcing scenario (0 is no forcing...need a more comprehensive list)
-IFORCING = 0
-
 # does band-splitting need to be done, or are there existing files 
 # that have divided up the full k-distribution?
 BANDSPLIT = False
@@ -66,27 +68,57 @@ CLEANUP = False
 # number of iterations for the optimization
 NITER = 1
 
-# cost function variables
-CFCOMPS = ['band_flux_net', 'flux_net']
-CFLEVS = [0, 10000, 102000] # pressure levels of interest in Pa
-CFWGT = [0.5, 0.5]
+CFCOMPS = ['band_flux_up', 'band_flux_dn']
+CFCOMPS = ['heating_rate', 'flux_net', 'flux_net_forcing_2']
+
+# level indices for each component 
+# (e.g., 0 for surface, 41 for Garand TOA)
+# one dictionary key per component so each component
+# can have its own set of level indices
+CFLEVS = {}
+CFLEVS['heating_rate'] = range(41)
+CFLEVS['flux_net'] = [0, 26, 42]
+CFLEVS['flux_net_forcing'] = [0, 26, 42]
+
+# weights for each cost function component
+CFWGT = [1/3., 1/3., 1/3.]
+
+# forcing scenario dictionary -- one index per CF component
+IFORCING = {}
+IFORCING['flux_net_forcing'] = 2
 
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
 
-with open('temp.pickle', 'rb') as fp: kBandDict = pickle.load(fp)
+with open('k-dist.pickle', 'rb') as fp: kBandDict = pickle.load(fp)
 
-coObj = BYBAND.gCombine_Cost(
-    kBandDict, fullBandFluxes, REFNC, TESTNC, 
-    IFORCING, 1, profilesNC=GARAND, exeRRTMGP=EXE, 
-    cleanup=CLEANUP, 
-    costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
-    costWeights=CFWGT, test=False)
+CFDIR = 'sfc_tpause_TOA_band_flux_up_down'
+CFDIR = 'salami'
 
+RESTORE = False
+pickleCost = 'cost-optimize.pickle'
+
+if RESTORE:
+    assert os.path.exists(pickleCost), 'Cannot find {}'.format(pickleCost)
+    print('Restoring {}'.format(pickleCost))
+    with open(pickleCost, 'rb') as fp: coObj = pickle.load(fp)
+else:
+    coObj = BYBAND.gCombine_Cost(
+        kBandDict, fullBandFluxes, REFNC, TESTNC, 
+        1, profilesNC=GARAND, exeRRTMGP=EXE, cleanup=CLEANUP, 
+        costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
+        costWeights=CFWGT, test=False, optDir='./{}'.format(CFDIR))
+# endif RESTORE
+    
 NITER = 2
-for i in range(1, NITER+1):
+DIAGNOSTICS = True
+for i in range(coObj.iCombine, NITER+1):
     t1 = time.process_time()
 
+    wgtInfo = ['{:.2f} ({})'.format(
+        wgt, comp) for wgt, comp in zip(CFWGT, CFCOMPS)]
+    wgtInfo = ' '.join(wgtInfo)
+    print('Weights: {}'.format(wgtInfo))
     print('Iteration {}'.format(i))
     temp = time.process_time()
     coObj.kMap()
@@ -101,6 +133,7 @@ for i in range(1, NITER+1):
     print('Flux Combine: {:.4f}'.format(time.process_time()-temp))
 
     temp = time.process_time()
+    coObj.costFuncComp(init=True)
     coObj.costFuncComp()
     print('Cost function computation: {:.4f}'.format(time.process_time()-temp))
 
@@ -109,14 +142,22 @@ for i in range(1, NITER+1):
     print('findOptimal: {:.4f}'.format(time.process_time()-temp))
 
     if coObj.optimized: break
+    if DIAGNOSTICS: coObj.costDiagnostics()
 
     coObj.setupNextIter()
 
+    temp = time.process_time()
+    with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)
+    print('Pickle: {:.4f}'.format(time.process_time()-temp))
+
     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
+    coObj.calcOptFlux(
+        KFULLNC, fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
 # end iteration loop
 
 t1 = time.process_time()
-coObj.calcOptFlux(KFULLNC)
+coObj.kDistOpt(KFULLNC)
+coObj.calcOptFlux()
 print('New k-file {:.4f}'.format(time.process_time()-t1))
 
 print('Optimization complete')
