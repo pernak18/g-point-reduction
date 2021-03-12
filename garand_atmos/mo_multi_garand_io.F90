@@ -21,7 +21,7 @@ module mo_multi_garand_io
   use mo_source_functions,   only: ty_source_func_lw
   use mo_gas_concentrations, only: ty_gas_concs
   use mo_rrtmgp_util_reorder
-  use mo_simple_netcdf,      only: read_field, read_string, var_exists, get_dim_size, &
+  use mo_simple_netcdf,      only: read_field, read_string, var_exists, dim_exists, get_dim_size, &
                                    write_field, create_dim, create_var
   use netcdf
   implicit none
@@ -322,7 +322,7 @@ contains
 
     sza         =  read_field(ncid, 'solar_zenith_angle',        ncol)
     tsi         =  read_field(ncid, 'total_solar_irradiance',    ncol)
-    if(var_exists(ncid, 'band')) then
+    if(dim_exists(ncid, 'band')) then
       sfc_alb_dir =  read_field(ncid, 'sfc_alb_direct',  nband, ncol)
       sfc_alb_dif =  read_field(ncid, 'sfc_alb_diffuse', nband, ncol)
     else
