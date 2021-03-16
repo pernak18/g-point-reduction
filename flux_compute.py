@@ -31,19 +31,6 @@ EXE = '{}/g-point-reduction/garand_atmos/rrtmgp_garand_atmos'.format(
     PROJECT)
 REFDIR = '{}/reference_netCDF/g-point-reduce'.format(PROJECT)
 
-KFULLNC = '{}/rrtmgp-data-lw-g256-2018-12-04.nc'.format(REFDIR)
-GARAND = '{}/multi_garand_template_single_band.nc'.format(REFDIR)
-
-# test (RRTMGP) and reference (LBL) flux netCDF files
-TESTNC = '{}/rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
-REFNC = '{}/lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
-
-#REFDIR = '/project/projectdirs/e3sm/pernak18/reference_netCDF'
-#TESTNC = '{}/profile-stats-plots/rrtmgp-lw-flux-inputs-outputs-garand-all.nc'.format(REFDIR)
-#TESTNC = '{}/g-point-reduce/rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
-
-PATHS = [KFULLNC, EXE, TESTNC, REFNC, GARAND]
-
 BANDSPLITDIR = 'band_k_dist'
 FULLBANDFLUXDIR = 'full_band_flux'
 
@@ -52,14 +39,33 @@ for PATH in PATHS: BYBAND.pathCheck(PATH)
 CWD = os.getcwd()
 
 # only do one domain or the other
-DOLW = True
+DOLW = False
 DOSW = not DOLW
 DOMAIN = 'LW' if DOLW else 'SW'
 NBANDS = 16 if DOLW else 14
 
+# test (RRTMGP) and reference (LBL) flux netCDF files, full k-distributions, 
+# and by-band Garand input file
+fluxSuffix = 'flux-inputs-outputs-garandANDpreind.nc'
+if DOLW:
+    GARAND = '{}/multi_garand_template_single_band.nc'.format(REFDIR)
+    KFULLNC = '{}/rrtmgp-data-lw-g256-2018-12-04.nc'.format(REFDIR)
+    REFNC = '{}/lblrtm-lw-{}'.format(REFDIR, fluxSuffix)
+    TESTNC = '{}/rrtmgp-lw-{}'.format(REFDIR, fluxSuffix)
+    #TESTNC = '{}/profile-stats-plots/rrtmgp-lw-flux-inputs-outputs-garand-all.nc'.format(REFDIR)
+    #TESTNC = '{}/g-point-reduce/rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
+else:
+    GARAND = '{}/charts_multi_garand_template_single_band.nc'.format(REFDIR)
+    KFULLNC = '{}/rrtmgp-data-sw-g224-2018-12-04.nc'.format(REFDIR)
+    REFNC = '{}/charts-sw-{}'.format(REFDIR, fluxSuffix)
+    TESTNC = '{}/rrtmgp-sw-{}'.format(REFDIR, fluxSuffix)
+# endif LW
+
+PATHS = [KFULLNC, EXE, TESTNC, REFNC, GARAND]
+
 # does band-splitting need to be done, or are there existing files 
 # that have divided up the full k-distribution?
-BANDSPLIT = False
+BANDSPLIT = True
 
 # remove the netCDFs that are generated for all of the combinations 
 # and iterations of combinations in bandOptimize()
@@ -70,22 +76,21 @@ NITER = 1
 
 CFCOMPS = ['band_flux_up', 'band_flux_dn']
 CFCOMPS = ['heating_rate', 'flux_net', 'flux_net_forcing_2']
+CFCOMPS = ['flux_dir_dn', 'flux_dif_dn']
 
 # level indices for each component 
 # (e.g., 0 for surface, 41 for Garand TOA)
 # one dictionary key per component so each component
 # can have its own set of level indices
 CFLEVS = {}
-CFLEVS['heating_rate'] = range(41)
-CFLEVS['flux_net'] = [0, 26, 42]
-CFLEVS['flux_net_forcing'] = [0, 26, 42]
+# CFLEVS['heating_rate'] = range(41)
+# CFLEVS['flux_net'] = [0, 26, 42]
+# CFLEVS['flux_net_forcing'] = [0, 26, 42]
+CFLEVS['flux_dir_dn'] = [0, 26]
+CFLEVS['flux_dif_dn'] = [26, 42]
 
 # weights for each cost function component
-CFWGT = [1/3., 1/3., 1/3.]
-
-# forcing scenario dictionary -- one index per CF component
-IFORCING = {}
-IFORCING['flux_net_forcing'] = 2
+CFWGT = [0.5, 0.5]
 
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
@@ -94,8 +99,9 @@ with open('k-dist.pickle', 'rb') as fp: kBandDict = pickle.load(fp)
 
 CFDIR = 'sfc_tpause_TOA_band_flux_up_down'
 CFDIR = 'salami'
+CFDIR = 'direct-down'
 
-RESTORE = False
+RESTORE = True
 pickleCost = 'cost-optimize.pickle'
 
 if RESTORE:
@@ -104,12 +110,12 @@ if RESTORE:
     with open(pickleCost, 'rb') as fp: coObj = pickle.load(fp)
 else:
     coObj = BYBAND.gCombine_Cost(
-        kBandDict, fullBandFluxes, REFNC, TESTNC, 
-        1, profilesNC=GARAND, exeRRTMGP=EXE, cleanup=CLEANUP, 
+        kBandDict, fullBandFluxes, REFNC, TESTNC, 1, DOLW, 
+        profilesNC=GARAND, exeRRTMGP=EXE, cleanup=CLEANUP, 
         costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
         costWeights=CFWGT, test=False, optDir='./{}'.format(CFDIR))
 # endif RESTORE
-    
+
 NITER = 2
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
@@ -152,11 +158,11 @@ for i in range(coObj.iCombine, NITER+1):
 
     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
     coObj.calcOptFlux(
-        KFULLNC, fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
+        fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
 # end iteration loop
 
 t1 = time.process_time()
-coObj.kDistOpt(KFULLNC)
+#coObj.kDistOpt(KFULLNC)
 coObj.calcOptFlux()
 print('New k-file {:.4f}'.format(time.process_time()-t1))
 
