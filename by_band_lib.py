@@ -107,7 +107,7 @@ def fluxCompute(inK, profiles, exe, fluxDir, outFile):
     return outDS
 # end fluxCompute()
 
-def combineBands(iBand, fullDS, trialDS, finalDS=False):
+def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
     """
     Combine a given trial fluxes dataset in a given band with the full-band 
     fluxes from the rest of the bands
@@ -122,7 +122,13 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
             of the bands that were not modified
         trialDS -- xarray Dataset, fluxes for band where g-points were 
             combined
+        lw -- boolean, longwave instead of shortwave flux 
+            parameters saved to output netCDF
     
+    Keywords
+        finalDS -- boolean, merge all bands together after full 
+            optimization is complete
+        
     Output
         outDS -- xarray Dataset, fluxes for all bands
     """
@@ -131,6 +137,10 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
     bandVars = ['flux_up', 'flux_dn', 'flux_net', 'heating_rate', 
                 'emis_sfc', 'band_lims_wvn']
     fluxVars = bandVars[:4]
+    if not lw:
+        bandVars.append('flux_dir_dn')
+        fluxVars.append('flux_dir_dn')
+    # end shortWave
 
     outDS = xa.Dataset()
 
@@ -192,6 +202,11 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
 
         outDS[ncVar] = outDat
     # end ncVar loop
+
+    if not lw:
+        outDS['flux_dif_dn'] = outDS['flux_dn'] - outDS['flux_dir_dn']
+        fluxVars.append('flux_dif_dn')
+    # endif LW
 
     # calculate broadband fluxes
     for fluxVar in fluxVars:
@@ -314,7 +329,7 @@ class gCombine_kDist:
 
     # end constructor
 
-    def kDistBand(self, combine=False):
+    def kDistBand(self):
         """
         Split a full k-distribution into separate files for a given band 
         (default) or combine g-points in a given band and generate 
@@ -505,19 +520,19 @@ class gCombine_kDist:
                             # g1 and g2
                             ncDat = xa.where(
                                 ncDat.gpt == g1, w1 + w2, ncDat)
-                        elif ncVar == 'plank_fraction':
-                            # replace g1' weight with integrated weight at
-                            # g1 and g2
-                            pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
-                            ncDat = xa.where(ncDat.gpt == g1, pg1 + pg2, ncDat)
-                            ncDat = ncDat.transpose(*varDims)
-                        else:
+                        elif ncVar == 'kmajor':
                             # replace g1' slice with weighted average of
                             # g1 and g2;
                             # dimensions get swapped for some reason
                             kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
                                 (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
+                            ncDat = ncDat.transpose(*varDims)
+                        else:
+                            # replace g1' weight with integrated weight at
+                            # g1 and g2
+                            pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
+                            ncDat = xa.where(ncDat.gpt == g1, pg1 + pg2, ncDat)
                             ncDat = ncDat.transpose(*varDims)
                         # endif ncVar
 
@@ -547,9 +562,15 @@ class gCombine_kDist:
                     varDims = ncDat.dims
 
                     # no minor absorption contributions
-                    minCond1 = 'upper' in minCon and \
-                        self.iBand in [3, 11, 13, 14, 15]
-                    minCond2 = 'lower' in minCon and self.iBand == 13
+                    if self.doLW:
+                        minCond1 = 'upper' in minCon and \
+                            self.iBand in [3, 11, 13, 14, 15]
+                        minCond2 = 'lower' in minCon and self.iBand == 13
+                    else:
+                        minCond1 = 'upper' in minCon and \
+                            self.iBand in [1, 3, 4, 12, 13]
+                        minCond2 = 'lower' in minCon and self.iBand in [12, 13]
+                    # endif LW                        
 
                     if minCond1 or minCond2:
                         # grab a single, arbitrary slice of the kminor array
@@ -584,7 +605,7 @@ class gCombine_kDist:
 
 class gCombine_Cost:
     def __init__(self, bandDict, fullBandFluxes, 
-                fluxesLBL, fluxesRRTMGP, iCombine,
+                fluxesLBL, fluxesRRTMGP, iCombine, lw, 
                 profilesNC=GARAND, exeRRTMGP=EXE, 
                 cleanup=False, 
                 costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
@@ -614,6 +635,7 @@ class gCombine_Cost:
                 underway
 
         Keywords
+            lw -- boolean, do longwave domain (otherwise shortwave)
             profilesNC -- string, path to netCDF with atmospheric profiles
             topDir -- string, path to top level of git repository clone
             exeRRTMGP -- string, path to RRTMGP executable that is run
@@ -639,6 +661,7 @@ class gCombine_Cost:
         self.lblNC = str(fluxesLBL)
         self.rrtmgpNC = str(fluxesRRTMGP)
         self.iCombine = int(iCombine)
+        self.doLW = bool(lw)
         self.profiles = str(profilesNC)
         self.exe = str(exeRRTMGP)
         self.fullBandFluxes = list(fullBandFluxes)
@@ -800,7 +823,7 @@ class gCombine_Cost:
         # trial = g-point combination
         argsMap = []
         for iBand, trial in zip(bandIDs, self.trialDS):
-            argsMap.append((iBand, fullDS, trial))
+            argsMap.append((iBand, fullDS, trial, self.doLW, False))
 
         with multiprocessing.Pool(NCORES) as pool:
             result = pool.starmap_async(combineBands, argsMap)
@@ -847,6 +870,14 @@ class gCombine_Cost:
             for iDS, testDS in enumerate(allDS):
                 allComps = []
 
+                # add diffuse to SW dataset
+                # TO DO: should this be done outside of code?
+                # BAND DIRECT NO WORKING YET
+                if not self.doLW and init:
+                    testDS['flux_dif_dn'] = testDS['flux_dn'] - \
+                        testDS['flux_dir_dn']
+                # endif LW
+
                 for comp, weight in zip(self.compNameCF, self.costWeights):
                     # pressure dimension will depend on parameter
                     # layer for HR, level for everything else
@@ -872,7 +903,7 @@ class gCombine_Cost:
                         lblDSf = fLBL - bLBL
                         subsetErr = testDSf-lblDSf
 
-                        # what parameter are we extracting from netCDF?
+                        # what parameter are we extracting from dataset?
                         compDS = comp.replace('_forcing_{}'.format(iForce), '')
                     else:
                         # Compute differences in all variables in datasets at 
@@ -1312,7 +1343,7 @@ class gCombine_Cost:
         for bandNC in self.fullBandFluxes:
             with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
-        finalDS = combineBands(0, fullDS, fullDS[0], finalDS=True)
+        finalDS = combineBands(0, fullDS, fullDS[0], self.doLW, finalDS=True)
         finalDS.to_netcdf(fluxOutNC)
     # end calcOptFlux()
 # end gCombine_Cost
