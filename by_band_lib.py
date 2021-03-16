@@ -1344,6 +1344,8 @@ class gCombine_Cost:
             with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
         finalDS = combineBands(0, fullDS, fullDS[0], self.doLW, finalDS=True)
+        finalDS.heating_rate.attrs['units'] = 'K/s'
+        finalDS.band_heating_rate.attrs['units'] = 'K/s'
         finalDS.to_netcdf(fluxOutNC)
     # end calcOptFlux()
 # end gCombine_Cost
