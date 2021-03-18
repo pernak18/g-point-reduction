@@ -205,7 +205,9 @@ def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
 
     if not lw:
         outDS['flux_dif_dn'] = outDS['flux_dn'] - outDS['flux_dir_dn']
+        outDS['flux_dif_net'] = outDS['flux_dif_dn'] - outDS['flux_up']
         fluxVars.append('flux_dif_dn')
+        fluxVars.append('flux_dif_net')
     # endif LW
 
     # calculate broadband fluxes
@@ -873,9 +875,16 @@ class gCombine_Cost:
                 # add diffuse to SW dataset
                 # TO DO: should this be done outside of code?
                 # BAND DIRECT NO WORKING YET
-                if not self.doLW and init:
-                    testDS['flux_dif_dn'] = testDS['flux_dn'] - \
-                        testDS['flux_dir_dn']
+                if not self.doLW:
+                    lblDS['flux_dif_net'] = lblDS['flux_dif_dn'] - \
+                        lblDS['flux_up']
+
+                    if init:
+                        testDS['flux_dif_dn'] = testDS['flux_dn'] - \
+                            testDS['flux_dir_dn']
+                        testDS['flux_dif_net'] = testDS['flux_dif_dn'] - \
+                            testDS['flux_up']
+                    # endif init
                 # endif LW
 
                 for comp, weight in zip(self.compNameCF, self.costWeights):
