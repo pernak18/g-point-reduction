@@ -40,7 +40,6 @@ CWD = os.getcwd()
 
 # only do one domain or the other
 DOLW = False
-DOSW = not DOLW
 DOMAIN = 'LW' if DOLW else 'SW'
 NBANDS = 16 if DOLW else 14
 
@@ -76,7 +75,7 @@ NITER = 1
 
 CFCOMPS = ['band_flux_up', 'band_flux_dn']
 CFCOMPS = ['heating_rate', 'flux_net', 'flux_net_forcing_2']
-CFCOMPS = ['flux_dir_dn', 'flux_dif_dn']
+CFCOMPS = ['flux_dif_net', 'flux_dir_dn', 'heating_rate']
 
 # level indices for each component 
 # (e.g., 0 for surface, 41 for Garand TOA)
@@ -86,23 +85,24 @@ CFLEVS = {}
 # CFLEVS['heating_rate'] = range(41)
 # CFLEVS['flux_net'] = [0, 26, 42]
 # CFLEVS['flux_net_forcing'] = [0, 26, 42]
+CFLEVS['flux_dif_net'] = [0, 26, 42]
 CFLEVS['flux_dir_dn'] = [0, 26]
-CFLEVS['flux_dif_dn'] = [26, 42]
+CFLEVS['heating_rate'] = range(41)
 
 # weights for each cost function component
-CFWGT = [0.5, 0.5]
+CFWGT = [0.4, 0.4, 0.2]
 
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
 
-with open('k-dist.pickle', 'rb') as fp: kBandDict = pickle.load(fp)
+with open('SW_k-dist.pickle', 'rb') as fp: kBandDict = pickle.load(fp)
 
 CFDIR = 'sfc_tpause_TOA_band_flux_up_down'
 CFDIR = 'salami'
 CFDIR = 'direct-down'
 
 RESTORE = True
-pickleCost = 'cost-optimize.pickle'
+pickleCost = 'SW_cost-optimize.pickle'
 
 if RESTORE:
     assert os.path.exists(pickleCost), 'Cannot find {}'.format(pickleCost)
@@ -116,7 +116,7 @@ else:
         costWeights=CFWGT, test=False, optDir='./{}'.format(CFDIR))
 # endif RESTORE
 
-NITER = 2
+NITER = 5
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
     t1 = time.process_time()
@@ -162,7 +162,8 @@ for i in range(coObj.iCombine, NITER+1):
 # end iteration loop
 
 t1 = time.process_time()
-#coObj.kDistOpt(KFULLNC)
+KOUTNC = 'rrtmgp-data-{}-g-red.nc'.format(DOMAIN)
+coObj.kDistOpt(KFULLNC, kOutNC=KOUTNC)
 coObj.calcOptFlux()
 print('New k-file {:.4f}'.format(time.process_time()-t1))
 
