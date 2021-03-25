@@ -205,7 +205,9 @@ def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
 
     if not lw:
         outDS['flux_dif_dn'] = outDS['flux_dn'] - outDS['flux_dir_dn']
+        outDS['flux_dif_net'] = outDS['flux_dif_dn'] - outDS['flux_up']
         fluxVars.append('flux_dif_dn')
+        fluxVars.append('flux_dif_net')
     # endif LW
 
     # calculate broadband fluxes
@@ -873,9 +875,16 @@ class gCombine_Cost:
                 # add diffuse to SW dataset
                 # TO DO: should this be done outside of code?
                 # BAND DIRECT NO WORKING YET
-                if not self.doLW and init:
-                    testDS['flux_dif_dn'] = testDS['flux_dn'] - \
-                        testDS['flux_dir_dn']
+                if not self.doLW:
+                    lblDS['flux_dif_net'] = lblDS['flux_dif_dn'] - \
+                        lblDS['flux_up']
+
+                    if init:
+                        testDS['flux_dif_dn'] = testDS['flux_dn'] - \
+                            testDS['flux_dir_dn']
+                        testDS['flux_dif_net'] = testDS['flux_dif_dn'] - \
+                            testDS['flux_up']
+                    # endif init
                 # endif LW
 
                 for comp, weight in zip(self.compNameCF, self.costWeights):
@@ -1147,6 +1156,7 @@ class gCombine_Cost:
         has been performed
 
         TO DO: CLEAN THIS THE EFF UP!
+        TO DO: MAKE IT WORK WITH THE SW!
         """
 
         ncFiles = [self.distBands[key].kInNC for key in self.distBands.keys()]
@@ -1158,7 +1168,8 @@ class gCombine_Cost:
         # what netCDF variables have a g-point dimension and will thus
         # need to be modified in the combination iterations?
         # TO DO: need SW
-        kMajor = ['kmajor', 'plank_fraction']
+        kMajor = list(self.distBands['band01'].kMajVars)
+        kMajor.remove('gpt_weights')
 
         # kminor variables that are nontrivial to combine
         # for minor contributors
@@ -1176,11 +1187,17 @@ class gCombine_Cost:
                    'absorption_coefficient_ref_T', 
                    'press_ref_trop']
 
+        # no contributions in a given band
+        upNoBandMinor = [3, 11, 13, 14, 15] if self.doLW else \
+            [1, 3, 4, 12, 13]
+        loNoBandMinor = [13] if self.doLW else [12, 13]
+
+        nBands = 16 if self.doLW else 14
         nGpt = []
 
         # number of minor contributors per band
-        nPerBandUp = np.zeros(16).astype(int)
-        nPerBandLo = np.zeros(16).astype(int)
+        nPerBandUp = np.zeros(nBands).astype(int)
+        nPerBandLo = np.zeros(nBands).astype(int)
         for iNC, ncFile in enumerate(ncFiles):
             with xa.open_dataset(ncFile) as kDS:
                 sizeDS = kDS.sizes
@@ -1203,12 +1220,12 @@ class gCombine_Cost:
                     # endif empty var
 
                     # minor contributors coming back to haunt me
-                    # no contributions in a given band
                     minCond1 = ('minor_absorber_intervals_upper' in varDims or \
                         'contributors_upper' in varDims) and \
-                        iNC in [3, 11, 13, 14, 15]
+                        iNC in upNoBandMinor
                     minCond2 = ('minor_absorber_intervals_lower' in varDims or \
-                        'contributors_lower' in varDims) and iNC == 13
+                        'contributors_lower' in varDims) and \
+                        iNC in loNoBandMinor
                     if minCond1 or minCond2: continue
 
                     vDim = 'minor_absorber_intervals_upper'
