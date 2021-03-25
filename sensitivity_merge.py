@@ -3,6 +3,7 @@
 import os, sys
 import glob
 import xarray as xa
+import numpy as np
 
 NCDIR = '/Users/rpernak/Work/RC/RRTMGP/by-band-g-reduce/sensitivities'
 
@@ -29,6 +30,10 @@ if __name__ == '__main__':
   assert os.path.isdir(inDir), 'Could not find {}'.format(inDir)
 
   ncFiles = sorted(glob.glob('{}/*.nc'.format(args.indir)))
+
+  # ad-hoc sorting to match Jen's numbering convention
+  iSort = [0] + list(range(13, 19)) + [12] + list(range(1, 12))
+  ncFiles = np.array(ncFiles)[iSort]
 
   # add record coordinate dimension to each dataset; write temp netcdf
   print('Adding record dimension (creating temporary files)')
