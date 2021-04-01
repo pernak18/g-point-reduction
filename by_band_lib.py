@@ -893,24 +893,27 @@ class gCombine_Cost:
                     pStr = 'lay' if 'heating_rate' in comp else 'lev'
 
                     if 'forcing' in comp:
-                        # extract baseline and forcing scenarios
-                        # baseline is record 1 (Preindustrial)
-                        selDict = {'record': 1, pStr: self.pLevCF[comp]}
-                        bTest = testDS.isel(selDict)
-                        bLBL = lblDS.isel(selDict)
-                        
                         # assuming comp is following '*_forcing_N' where 
                         # * is the parameter (flux_net, heating_rate, etc.), 
                         # N is the forcing record index
                         iForce = int(comp.split('_')[-1])
 
+                        # extract baseline and forcing scenarios
+                        # baseline is record 0 (Present DAy) or 
+                        # 1 (Preindustrial) -- see 
+                        # https://github.com/pernak18/g-point-reduction/wiki/LW-Forcing-Number-Convention
+                        iBase = 1 if iForce < 7 else 0
+                        selDict = {'record': iBase, pStr: self.pLevCF[comp]}
+                        bTest = testDS.isel(selDict)
+                        bLBL = lblDS.isel(selDict)
+                        
                         # calculate forcing
                         selDict['record'] = int(iForce)
                         fTest = testDS.isel(selDict)
                         fLBL = lblDS.isel(selDict)
                         testDSf = fTest - bTest
                         lblDSf = fLBL - bLBL
-                        subsetErr = testDSf-lblDSf
+                        subsetErr = testDSf - lblDSf
 
                         # what parameter are we extracting from dataset?
                         compDS = comp.replace('_forcing_{}'.format(iForce), '')
@@ -962,7 +965,7 @@ class gCombine_Cost:
                         self.dCostComps[comp].append(
                             (self.costComps[comp][-1] - self.costComp0[comp]))
                     # endif init
-                # end ncVar loop
+                # end comp loop
 
                 allComps = np.array(allComps)
 
@@ -974,6 +977,7 @@ class gCombine_Cost:
                     for iComp, comp in enumerate(self.compNameCF):
                         self.cost0[comp].append(allComps[iComp])
                         self.costComp0[comp] = self.costComps[comp][0]
+                    # end comp loop
                 else:
                     totalCost = allComps.sum()
                     self.totalCost.append(totalCost)
