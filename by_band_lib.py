@@ -142,6 +142,7 @@ def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
         fluxVars.append('flux_dir_dn')
     # end shortWave
 
+    inBand = int(iBand)
     outDS = xa.Dataset()
 
     # replace original fluxes for trial band with modified one
@@ -193,8 +194,6 @@ def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
                        'pair': np.arange(2)}
             outDat = xa.DataArray(
                 [gptLims] * nForce, dims=modDims)
-        #elif 'heating_rate' in ncVar:
-        #    continue
         else:
             # retain any variables with no band dimension
             outDat = trialDS[ncVar]
@@ -300,7 +299,7 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
             iForce = int(comp.split('_')[-1])
            
             # extract baseline and forcing scenarios
-            # baseline is record 0 (Present DAy) or 
+            # baseline is record 0 (Present Day) or 
             # 1 (Preindustrial) -- see 
             # https://github.com/pernak18/g-point-reduction/wiki/LW-Forcing-Number-Convention
             iBase = 1 if iForce < 7 else 0
@@ -597,7 +596,7 @@ class gCombine_kDist:
                     varShape = contribDS.shape
                     # can't actually have a zero-len dimension, so
                     # we will make fake data
-                    newDim = 1
+                    newDim = self.nWeights
                     newShape = (varShape[0], varShape[1], newDim)
 
                     contribDS = xa.DataArray(
@@ -1014,18 +1013,11 @@ class gCombine_Cost:
             self.dCostComps[comp] = []
         # end comp loop
 
-        # trial = g-point combination
-        # set up arguments for parallelization
-        argsMap = []
-        for testDS in allDS: argsMap.append(
-            (lblDS, testDS, self.doLW, self.compNameCF, 
-             self.pLevCF, self.costComp0, scale, False))
-
         if init:
             # initial cost calculation; used for scaling -- 
             # how did cost change relative to original 256 g-point cost
             costDict = costCalc(
-                lblDS, testDS, self.doLW, self.compNameCF, 
+                lblDS, allDS[0], self.doLW, self.compNameCF, 
                 self.pLevCF, self.costComp0, scale, True)
 
             self.costComps = dict(costDict['costComps'])
@@ -1040,6 +1032,13 @@ class gCombine_Cost:
                 self.costComp0[comp] = self.costComps[comp]
             # end component loop
         else:
+            # trial = g-point combination
+            # set up arguments for parallelization
+            argsMap = []
+            for testDS in allDS: argsMap.append(
+                (lblDS, testDS, self.doLW, self.compNameCF, 
+                 self.pLevCF, self.costComp0, scale, False))
+
             # parallize cost calculation for trials and extract output
             with multiprocessing.Pool(NCORES) as pool:
                 result = pool.starmap_async(costCalc, argsMap)
