@@ -296,7 +296,7 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
             # assuming comp is following '*_forcing_N' where 
             # * is the parameter (flux_net, heating_rate, etc.), 
             # N is the forcing record index
-            iForce = int(comp.split('_')[-1])
+            iForce = int(comp.split('_')[-1])-1
            
             # extract baseline and forcing scenarios
             # baseline is record 0 (Present Day) or 
@@ -316,7 +316,7 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
             subsetErr = testDSf - lblDSf
 
             # what parameter are we extracting from dataset?
-            compDS = comp.replace('_forcing_{}'.format(iForce), '')
+            compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
         else:
             # Compute differences in all variables in datasets at 
             # levels closest to user-provided pressure levels
@@ -328,8 +328,8 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
                 # (PI, PI 2xCH4) to be requested using the 
                 # "param_N" convention with "N" being the forcing
                 # scenario index
-                iForce = int(comp.split('_')[-1])
-                compDS = comp.replace('_{}'.format(iForce), '')
+                iForce = int(comp.split('_')[-1])-1
+                compDS = comp.replace('_{}'.format(iForce+1), '')
             except:
                 # default to present day Garand atm specs
                 iForce = 0
@@ -726,7 +726,7 @@ class gCombine_kDist:
                         # grab a single, arbitrary slice of the kminor array
                         # and replace it with zeroes (cannot have 0-length 
                         # arrays in RRTMGP)
-                        ncDat = ncDat.where(ncDat[minCon] == 0, drop=True) * 0
+                        ncDat = ncDat.isel({minCon: slice(0, nNew)}) * 0
                     else:
                         for minInt in range(kDS.dims[minIntVar]):
                             dG = minInt*nNew
