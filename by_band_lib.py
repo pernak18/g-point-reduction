@@ -1039,6 +1039,9 @@ class gCombine_Cost:
                 (lblDS, testDS, self.doLW, self.compNameCF, 
                  self.pLevCF, self.costComp0, scale, False))
 
+            allCostDict = []
+            for args in argsMap: allCostDict.append(costCalc(*args))
+            """
             # parallize cost calculation for trials and extract output
             with multiprocessing.Pool(NCORES) as pool:
                 result = pool.starmap_async(costCalc, argsMap)
@@ -1046,8 +1049,9 @@ class gCombine_Cost:
                 # https://stackoverflow.com/a/57725895 => yes
                 allCostDict = result.get()
             # endwith
+            """
 
-            for costDict in allCostDict:
+            for iDict, costDict in enumerate(allCostDict):
                 self.totalCost.append(costDict['totalCost'])
                 self.dCost.append(costDict['dCost'])
                 for comp in self.compNameCF:
