@@ -44,7 +44,8 @@ CFLEVS['band_flux_net'] = [0, 26, 42]
 CFWGT = [0.5, 0.5]
 
 # THIS NEEDS TO BE ADJUSTED FOR NERSC! cutting the total nCores in half
-NCORES = multiprocessing.cpu_count() // 2
+NCORES = 24 #multiprocessing.cpu_count() // 2
+CHUNK = 10
 
 def pathCheck(path, mkdir=False):
     """
@@ -100,11 +101,12 @@ def fluxCompute(inK, profiles, exe, fluxDir, outFile):
     os.rename(inRRTMGP, outFile)
     #print('Wrote {}'.format(outFile))
 
-    outDS = xa.open_dataset(outFile)
+    with xa.open_dataset(outFile) as outDS:
+        outDS.load()
+        os.chdir(cwd)
 
-    os.chdir(cwd)
-
-    return outDS
+        return outDS
+    # endwith
 # end fluxCompute()
 
 def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
@@ -936,7 +938,7 @@ class gCombine_Cost:
         # using processes (slower, separate memory) instead of threads
         #print('Calculating fluxes')
         with multiprocessing.Pool(NCORES) as pool:
-            result = pool.starmap_async(fluxCompute, argsMap)
+            result = pool.starmap_async(fluxCompute, argsMap, chunksize=CHUNK)
             # is order preserved?
             # https://stackoverflow.com/a/57725895 => yes
             self.trialDS = result.get()
@@ -959,7 +961,11 @@ class gCombine_Cost:
         # will be combined accordingly with single-band g-point combinations
         fullDS = []
         for bandNC in self.fullBandFluxes:
-            with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
+            with xa.open_dataset(bandNC) as bandDS:
+                bandDS.load()
+                fullDS.append(bandDS)
+            # end with
+        # end bandNC loop
 
         #print('Combining trial fluxes with full-band fluxes')
 
@@ -969,7 +975,7 @@ class gCombine_Cost:
             argsMap.append((iBand, fullDS, trial, self.doLW, False))
 
         with multiprocessing.Pool(NCORES) as pool:
-            result = pool.starmap_async(combineBands, argsMap)
+            result = pool.starmap_async(combineBands, argsMap, chunksize=CHUNK)
             # is order preserved?
             # https://stackoverflow.com/a/57725895 => yes
             self.combinedDS = result.get()
@@ -990,6 +996,8 @@ class gCombine_Cost:
                 full g-point k-distribution
         """
 
+        from itertools import repeat
+
         #print('Calculating cost for each trial')
 
         if init:
@@ -1005,6 +1013,7 @@ class gCombine_Cost:
             scale[comp] = 1 if init else weight * 100 / self.cost0[comp][0]
 
         lblDS = xa.open_dataset(self.lblNC)
+        lblDS.load()
 
         for comp in self.compNameCF:
             # locally, we'll average over profiles AND pLevCF, but 
@@ -1039,17 +1048,13 @@ class gCombine_Cost:
                 (lblDS, testDS, self.doLW, self.compNameCF, 
                  self.pLevCF, self.costComp0, scale, False))
 
-            allCostDict = []
-            for args in argsMap: allCostDict.append(costCalc(*args))
-            """
             # parallize cost calculation for trials and extract output
             with multiprocessing.Pool(NCORES) as pool:
-                result = pool.starmap_async(costCalc, argsMap)
+                result = pool.starmap_async(costCalc, argsMap, chunksize=CHUNK)
                 # is order preserved?
                 # https://stackoverflow.com/a/57725895 => yes
                 allCostDict = result.get()
             # endwith
-            """
 
             for iDict, costDict in enumerate(allCostDict):
                 self.totalCost.append(costDict['totalCost'])
