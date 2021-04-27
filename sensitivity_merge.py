@@ -19,6 +19,11 @@ if __name__ == '__main__':
   parser.add_argument('--indir', '-i', type=str, default=NCDIR, \
     help='Directory with RRTMGP netCDF flux files for each ' + \
     'sensitivity.')
+  parser.add_argument('--sw', '-sw', action='store_true', \
+    help='Concatenate SW netCDF files, which will follow ' + \
+    'the same record numbering scheme as the LW up through ' + \
+    'preindustrial (record 7), then have a Garand PD forcing ' + \
+    'scenario added.')
   parser.add_argument('--outfile', '-o', type=str, \
     default='lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc', \
     help='Name of new, consolidated netCDF with `record` dim.')
@@ -32,7 +37,13 @@ if __name__ == '__main__':
   ncFiles = sorted(glob.glob('{}/*.nc'.format(args.indir)))
 
   # ad-hoc sorting to match Jen's numbering convention
-  iSort = [0] + list(range(13, 19)) + [12] + list(range(1, 12))
+  # https://github.com/pernak18/g-point-reduction/wiki/LW-Forcing-Number-Convention
+  if args.sw:
+    iSort = [0] + list(range(2, 8)) + [1]
+  else:
+    iSort = [0] + list(range(13, 19)) + [12] + list(range(1, 12))
+  # endif sw
+
   ncFiles = np.array(ncFiles)[iSort]
 
   # add record coordinate dimension to each dataset; write temp netcdf
@@ -53,6 +64,7 @@ if __name__ == '__main__':
   print('Concatenating datasets')
   ncFiles = [os.path.basename(nc) for nc in ncFiles]
   newDS = xa.open_mfdataset(ncFiles, concat_dim='record')
+  newDS = newDS.fillna(0)
 
   # older files have the dimensions switched for these guys
   newDims = ('record', 'band', 'pair')
