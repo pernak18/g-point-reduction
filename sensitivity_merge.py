@@ -39,7 +39,7 @@ if __name__ == '__main__':
   # ad-hoc sorting to match Jen's numbering convention
   # https://github.com/pernak18/g-point-reduction/wiki/LW-Forcing-Number-Convention
   if args.sw:
-    iSort = [0] + list(range(2, 8)) + [1]
+    iSort = [0] + list(range(3, 9)) + [1, 2]
   else:
     iSort = [0] + list(range(13, 19)) + [12] + list(range(1, 12))
   # endif sw
