@@ -304,7 +304,19 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
             # baseline is record 0 (Present Day) or 
             # 1 (Preindustrial) -- see 
             # https://github.com/pernak18/g-point-reduction/wiki/LW-Forcing-Number-Convention
-            iBase = 1 if iForce < 7 else 0
+            if doLW:
+                iBase = 1 if iForce < 7 else 0
+            else:
+                # keeping minor-19 for Eli (see LW-Forcing-Number-Convention link)
+                # but code iForce needs to be recalibrated
+                if iForce == 18:
+                    iForce = 8
+                    iBase = 7
+                else:
+                    iBase = 1 if iForce < 7 else 0
+                # endif iForce
+            # endif doLW
+
             selDict = {'record': iBase, pStr: pLevCF[comp]}
             bTest = testDS.isel(selDict)
             bLBL = lblDS.isel(selDict)
@@ -318,7 +330,15 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
             subsetErr = testDSf - lblDSf
 
             # what parameter are we extracting from dataset?
-            compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
+            if doLW:
+                compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
+            else:
+                if iForce == 8:
+                    compDS = comp.replace('_forcing_19', '')
+                else:
+                    compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
+                # endif iForce
+            # end doLW
         else:
             # Compute differences in all variables in datasets at 
             # levels closest to user-provided pressure levels
