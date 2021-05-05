@@ -6,7 +6,7 @@ PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
     'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
 paths = [PIPPATH, 'common']
 for path in paths: sys.path.append(path)
-    
+
 # in common
 import utils
 
@@ -17,34 +17,37 @@ import xarray as xa
 import numpy as np
 
 # GLOBAL VARIABLE CONFIGURATION
+# TO DO: better way to do this?
 # COST FUNCTION DEFINITION (components, levels, weights)
 COMPS = ['flux_net', 'heating_rate']
+COMPS = ['flux_net']
 
 # 1 level key must exist for each COMPS string
 # indices of pressure levels to use in cost calculation
 # 0: Surface, 26: Tropopause, 42: TOA
 LEVELS = {}
 LEVELS['flux_net'] = [0, 26, 42]
-LEVELS['heating_rate'] = range(41)
+# LEVELS['heating_rate'] = range(41)
 
 # 1 weight per COMPS string
 WEIGHTS = [0.5, 0.5]
+WEIGHTS = [1]
 
 if __name__ == '__main__':
   import argparse
 
   parser = argparse.ArgumentParser(\
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter, 
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     description='')
-  parser.add_argument('--ref_path', '-r', type=str, 
-    default='lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc', 
+  parser.add_argument('--ref_path', '-r', type=str,
+    default='lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc',
     help='Reference file (LBLRTM or CHARTS/LBL) path to ' + \
       'RRTMGP-type netCDF flux file.')
   parser.add_argument('--test_path', '-t', type=str, \
-    default='rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc', 
+    default='rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc',
     help='Path to RRTMGP netCDF flux file for full k-distribution.')
-  parser.add_argument('--others', '-o', type=str, nargs='+', 
-    default=['optimized_fluxes.nc', 'optimized_fluxes_iter001.nc'], 
+  parser.add_argument('--others', '-o', type=str, nargs='+',
+    default=['optimized_fluxes.nc', 'optimized_fluxes_iter001.nc'],
     help='List of paths to additional test files that are ' + \
       'similar to --test_path, but for additional configurations ' + \
       '(optimal angle, g-point reduction, etc.). The total cost ' + \
@@ -62,7 +65,7 @@ if __name__ == '__main__':
 
   doLW = not args.sw
 
-  scale, costComp0, totalCost = {}, {}, {}
+  scale, cost0, totalCost = {}, {}, {}
 
   # normalize to get HR an fluxes on same scale
   # so each cost component has its own scale to 100
@@ -74,10 +77,12 @@ if __name__ == '__main__':
     # first calculate the cost of full k-distribution RRTMGP
     isInit = True
     costDict = REDUX.costCalc(
-      rDS, tDS, doLW, COMPS, LEVELS, costComp0, scale, isInit)
+      rDS, tDS, doLW, COMPS, LEVELS, cost0, scale, isInit)
 
-    # store initial cost components
-    for comp in COMPS: costComp0[comp] = costDict['costComps'][comp]
+    # store initial cost for each component (integrated over all
+    # pressure levels specified by user)
+    for iComp, comp in enumerate(COMPS):
+      cost0[comp] = costDict['allComps'][iComp]
 
     # save total cost for full k configuration
     totalCost['Full_k'] = costDict['totalCost']
@@ -86,18 +91,21 @@ if __name__ == '__main__':
   # now use initial cost in normalization
   scale = {}
   for comp, weight in zip(COMPS, WEIGHTS):
-    scale[comp] = weight * 100 / costComp0[comp]
+    scale[comp] = weight * 100 / cost0[comp]
 
   for i, other in enumerate(others):
     print('Calculating cost for {}'.format(other))
     with xa.open_dataset(refNC) as rDS, xa.open_dataset(other) as oDS:
       isInit = False
       costDict = REDUX.costCalc(
-        rDS, oDS, doLW, COMPS, LEVELS, costComp0, scale, isInit)
+        rDS, oDS, doLW, COMPS, LEVELS, cost0, scale, isInit)
     # endwith
+
+    # TO DO: will wanna label better
     totalCost[os.path.basename(other)] = costDict['totalCost']
   # end path loop
 
+  # TO DO: save to a file? CSV?
   # print out cost for each configuration
   for key in totalCost.keys():
     print('{:50s}{:10.3f}'.format(key, totalCost[key]))
