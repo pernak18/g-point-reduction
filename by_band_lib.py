@@ -239,9 +239,11 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
         lblDS -- xarray dataset, LBLRTM reference
         testDS -- xarray dataset, RRTMGP trial dataset (i.e., g-points combined)
         doLW -- boolean, LW or SW parameters used in cost
-        compNameCF -- dictionary; keys for each compNameCF, float scalar values
-        pLevCF -- dictionary; keys for each compNameCF, float scalar values
-        costComp0 -- dictionary; keys for each compNameCF, float scalar values
+        compNameCF -- string list of cost function component names (e.g., "flux_net")
+        pLevCF -- dictionary; keys for each compNameCF, float iterable (list) values 
+            of pressure levels at which each CF component is evaluated
+        costComp0 -- dictionary; keys for each compNameCF, float scalar values of 
+            initial cost associated with RRTMGP full k-distribution
         scale -- dictionary; keys for each compNameCF, float scalar values
         init -- boolean, calculate initial cost i.e., with the full
             256 g-point k-distribution)
@@ -304,18 +306,13 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
             # baseline is record 0 (Present Day) or 
             # 1 (Preindustrial) -- see 
             # https://github.com/pernak18/g-point-reduction/wiki/LW-Forcing-Number-Convention
-            if doLW:
-                iBase = 1 if iForce < 7 else 0
-            else:
+            if not doLW:
                 # keeping minor-19 for Eli (see LW-Forcing-Number-Convention link)
                 # but code iForce needs to be recalibrated
-                if iForce == 18:
-                    iForce = 8
-                    iBase = 7
-                else:
-                    iBase = 1 if iForce < 7 else 0
-                # endif iForce
+                if iForce == 18: iForce -= 11
             # endif doLW
+
+            iBase = 1 if iForce < 7 else 0
 
             selDict = {'record': iBase, pStr: pLevCF[comp]}
             bTest = testDS.isel(selDict)
@@ -333,7 +330,7 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
             if doLW:
                 compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
             else:
-                if iForce == 8:
+                if iForce == 7:
                     compDS = comp.replace('_forcing_19', '')
                 else:
                     compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
@@ -692,7 +689,7 @@ class gCombine_kDist:
                             # g1 and g2
                             ncDat = xa.where(
                                 ncDat.gpt == g1, w1 + w2, ncDat)
-                        elif ncVar == 'kmajor':
+                        elif ncVar in ['kmajor', 'rayl_upper', 'rayl_lower']:
                             # replace g1' slice with weighted average of
                             # g1 and g2;
                             # dimensions get swapped for some reason
@@ -701,7 +698,7 @@ class gCombine_kDist:
                                 (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
                             ncDat = ncDat.transpose(*varDims)
                         else:
-                            # replace g1' weight with integrated weight at
+                            # replace g1' weight with integrated values at
                             # g1 and g2
                             pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1, pg1 + pg2, ncDat)
