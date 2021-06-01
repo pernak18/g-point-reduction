@@ -93,8 +93,6 @@ def kCombine(ncFiles, outNC='rrtmgp-combined_k_dist.nc'):
     # end interval loop
   # end reg loop
 
-  # indices that represent minor contributors in various arrays
-
   # more than just the g-point dimension changes if the number
   # of g-points is altered --> "g-point dimensions"
   minIntDims = list(nInterval.keys())
@@ -126,8 +124,7 @@ def kCombine(ncFiles, outNC='rrtmgp-combined_k_dist.nc'):
       # should only be 1 dimension
       minDim = minAbsMatch[0]
       reg = 'upper' if 'upper' in minDim else 'lower'
-      print('limits', outVar, dims)
-      if 'gpt_limits' in outVar:
+      if 'limits' in outVar:
         modDims = \
           {minDim: range(len(gLims[reg])), 'pair': np.arange(2)}
         outDS[outVar] = xa.DataArray(gLims[reg], dims=modDims)
@@ -139,7 +136,7 @@ def kCombine(ncFiles, outNC='rrtmgp-combined_k_dist.nc'):
         outDS[outVar] = xa.DataArray(kMinStart[reg], dims=modDims)
       else:
         outDS[outVar] = xa.concat(
-          np.array(inDA)[minorBands[reg]], minDim)
+          np.array(inDA, dtype=object)[minorBands[reg]], minDim)
       # endif gpt_limits
     else:
       # should be the same for the each band -- keep just 1
@@ -147,6 +144,40 @@ def kCombine(ncFiles, outNC='rrtmgp-combined_k_dist.nc'):
     # endif gMatch
   # end outVar loop
 
+  # now ensure data encoding matches original (non-reduced) k-distributions
+  origNC = 'rrtmgp-data-lw-g256-2018-12-04.nc' if doLW else \
+    'rrtmgp-data-sw-g224-2018-12-04.nc'
+  assert os.path.exists(origNC), 'Could not find {}'.format(origNC)
+  encoding = {}
+
+  with xa.open_dataset(origNC) as origDS:
+    origVars = list(origDS.keys())
+    for origVar in origVars: encoding[origVar] = origDS[origVar].encoding
+  # endwith
+
+  strVars = ['gas_minor', 'gas_names', 'identifier_minor', 
+             'minor_gases_lower', 'minor_gases_upper', 
+             'scaling_gas_lower', 'scaling_gas_upper']
+  encode = {}
+  for sv in strVars: 
+    encode[sv] = {'zlib': True, 'complevel': 5, 'char_dim_name': 'string_len'}
+
+  ncVars = list(outDS.keys())
+  for ncVar in ncVars:
+    if ncVar == 'gpt_weights': continue
+    outDat = outDS[ncVar]
+    if ncVar in strVars:
+      outDat = outDat.astype(str)
+      strings = [''.join(string) for string in outDat.values]
+      outDS[ncVar] = xa.DataArray(
+        np.array(strings, dtype=np.dtype(('S', 32))), 
+        dims=[outDat.dims[0]], attrs=outDat.attrs)
+    else:
+      outDS[ncVar] = xa.DataArray(outDat)
+      outDS[ncVar].encoding['dtype'] = origDS[ncVar].encoding['dtype']
+    # endif ncVar
+  # end ncVar loop
+  
   outDS.to_netcdf(outNC)
   print('Wrote {}'.format(outNC))
 # end kCombine()
