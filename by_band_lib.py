@@ -1108,6 +1108,10 @@ class gCombine_Cost:
             self.combinedDS.pop(self.iOpt)
             self.totalCost.pop(self.iOpt)
             self.dCost.pop(self.iOpt)
+            for comp in self.compNameCF:
+                self.costComps[comp].pop(self.iOpt)
+                self.dCostComps[comp].pop(self.iOpt)
+            # end comp loop
 
             # no more trial to consider
             if len(self.totalCost) == 0:

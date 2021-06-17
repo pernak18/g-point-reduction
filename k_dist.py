@@ -34,7 +34,7 @@ FULLBANDFLUXDIR = 'full_band_flux'
 CWD = os.getcwd()
 
 # only do one domain or the other
-DOLW = False
+DOLW = True
 DOSW = not DOLW
 DOMAIN = 'LW' if DOLW else 'SW'
 NBANDS = 16 if DOLW else 14
@@ -63,4 +63,4 @@ for iBand, kFile in enumerate(kFiles):
     print('Band {} complete'.format(band))
 # end kFile loop
 
-#with open('temp.pickle', 'wb') as fp: pickle.dump(kBandDict, fp)
+with open('{}_k-dist.pickle'.format(DOMAIN), 'wb') as fp: pickle.dump(kBandDict, fp)
