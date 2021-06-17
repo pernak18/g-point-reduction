@@ -18,20 +18,65 @@ import numpy as np
 
 # GLOBAL VARIABLE CONFIGURATION
 # TO DO: better way to do this?
+# TO DO: add provisions for COMPS and LEVELS consistency
+# TO DO: provision for sum(weights) = 1
 # COST FUNCTION DEFINITION (components, levels, weights)
-COMPS = ['flux_net', 'heating_rate']
-COMPS = ['flux_net']
+
+# Eli LW
+COMPS = ['flux_net', 'band_flux_net', 'heating_rate',
+  'heating_rate_7', 'flux_net_forcing_5', 'flux_net_forcing_6',
+  'flux_net_forcing_7', 'flux_net_forcing_9', 'flux_net_forcing_10',
+  'flux_net_forcing_11', 'flux_net_forcing_12', 'flux_net_forcing_13',
+  'flux_net_forcing_14', 'flux_net_forcing_15', 'flux_net_forcing_16',
+  'flux_net_forcing_17', 'flux_net_forcing_18']
+
+# Eli SW
+COMPS = ['flux_dif_net', 'flux_dir_dn', 'heating_rate',
+  'heating_rate_7', 'flux_net_forcing_5', 'flux_net_forcing_6',
+  'flux_net_forcing_7', 'flux_net_forcing_19']
 
 # 1 level key must exist for each COMPS string
 # indices of pressure levels to use in cost calculation
 # 0: Surface, 26: Tropopause, 42: TOA
+# Eli LW
 LEVELS = {}
 LEVELS['flux_net'] = [0, 26, 42]
-# LEVELS['heating_rate'] = range(41)
+LEVELS['band_flux_net'] = [42]
+LEVELS['heating_rate'] = range(42)
+LEVELS['heating_rate_7'] = range(42)
+LEVELS['flux_net_forcing_5'] = [0, 26, 42]
+LEVELS['flux_net_forcing_6'] = [0, 26, 42]
+LEVELS['flux_net_forcing_7'] = [0, 26, 42]
+LEVELS['flux_net_forcing_9'] = [0, 26, 42]
+LEVELS['flux_net_forcing_10'] = [0, 26, 42]
+LEVELS['flux_net_forcing_11'] = [0, 26, 42]
+LEVELS['flux_net_forcing_12'] = [0, 26, 42]
+LEVELS['flux_net_forcing_13'] = [0, 26, 42]
+LEVELS['flux_net_forcing_14'] = [0, 26, 42]
+LEVELS['flux_net_forcing_15'] = [0, 26, 42]
+LEVELS['flux_net_forcing_16'] = [0, 26, 42]
+LEVELS['flux_net_forcing_17'] = [0, 26, 42]
+LEVELS['flux_net_forcing_18'] = [0, 26, 42]
+
+# Eli SW
+LEVELS = {}
+LEVELS['flux_dif_net'] = [0, 26, 42]
+LEVELS['flux_dir_dn'] = range(42)
+LEVELS['heating_rate'] = range(42)
+LEVELS['heating_rate_7'] = range(42)
+LEVELS['flux_net_forcing_5'] = [0,42]
+LEVELS['flux_net_forcing_6'] = [0,42]
+LEVELS['flux_net_forcing_7'] = [0,42]
+LEVELS['flux_net_forcing_19'] = [0,42]
 
 # 1 weight per COMPS string
-WEIGHTS = [0.5, 0.5]
-WEIGHTS = [1]
+# Eli LW
+WEIGHTS =  [0.6, 0.04, 0.12, 0.12, 0.01, 0.02, 0.04, 0.005,
+            0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005,
+            0.005]
+
+# Eli SW
+WEIGHTS = [0.1, 0.6, 0.05, 0.05, 0.02, 0.05, 0.11, 0.02]
 
 if __name__ == '__main__':
   import argparse
@@ -108,5 +153,6 @@ if __name__ == '__main__':
   # TO DO: save to a file? CSV?
   # print out cost for each configuration
   for key in totalCost.keys():
-    print('{:50s}{:10.3f}'.format(key, totalCost[key]))
+    norm = '(Non-normalized)' if 'Full_k' in key else '(Normalized)'
+    print('{:100s}{:10.3f} {:s}'.format(key, totalCost[key], norm))
 # endif main()
