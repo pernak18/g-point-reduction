@@ -44,7 +44,8 @@ CFLEVS['band_flux_net'] = [0, 26, 42]
 CFWGT = [0.5, 0.5]
 
 # THIS NEEDS TO BE ADJUSTED FOR NERSC! cutting the total nCores in half
-NCORES = multiprocessing.cpu_count() // 2
+NCORES = 24 #multiprocessing.cpu_count() // 2
+CHUNK = 10
 
 def pathCheck(path, mkdir=False):
     """
@@ -100,14 +101,15 @@ def fluxCompute(inK, profiles, exe, fluxDir, outFile):
     os.rename(inRRTMGP, outFile)
     #print('Wrote {}'.format(outFile))
 
-    outDS = xa.open_dataset(outFile)
+    with xa.open_dataset(outFile) as outDS:
+        outDS.load()
+        os.chdir(cwd)
 
-    os.chdir(cwd)
-
-    return outDS
+        return outDS
+    # endwith
 # end fluxCompute()
 
-def combineBands(iBand, fullDS, trialDS, finalDS=False):
+def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
     """
     Combine a given trial fluxes dataset in a given band with the full-band 
     fluxes from the rest of the bands
@@ -122,7 +124,13 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
             of the bands that were not modified
         trialDS -- xarray Dataset, fluxes for band where g-points were 
             combined
+        lw -- boolean, longwave instead of shortwave flux 
+            parameters saved to output netCDF
     
+    Keywords
+        finalDS -- boolean, merge all bands together after full 
+            optimization is complete
+        
     Output
         outDS -- xarray Dataset, fluxes for all bands
     """
@@ -131,7 +139,12 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
     bandVars = ['flux_up', 'flux_dn', 'flux_net', 'heating_rate', 
                 'emis_sfc', 'band_lims_wvn']
     fluxVars = bandVars[:4]
+    if not lw:
+        bandVars.append('flux_dir_dn')
+        fluxVars.append('flux_dir_dn')
+    # end shortWave
 
+    inBand = int(iBand)
     outDS = xa.Dataset()
 
     # replace original fluxes for trial band with modified one
@@ -183,8 +196,6 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
                        'pair': np.arange(2)}
             outDat = xa.DataArray(
                 [gptLims] * nForce, dims=modDims)
-        #elif 'heating_rate' in ncVar:
-        #    continue
         else:
             # retain any variables with no band dimension
             outDat = trialDS[ncVar]
@@ -192,6 +203,13 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
 
         outDS[ncVar] = outDat
     # end ncVar loop
+
+    if not lw:
+        outDS['flux_dif_dn'] = outDS['flux_dn'] - outDS['flux_dir_dn']
+        outDS['flux_dif_net'] = outDS['flux_dif_dn'] - outDS['flux_up']
+        fluxVars.append('flux_dif_dn')
+        fluxVars.append('flux_dif_net')
+    # endif LW
 
     # calculate broadband fluxes
     for fluxVar in fluxVars:
@@ -205,6 +223,172 @@ def combineBands(iBand, fullDS, trialDS, finalDS=False):
 
     return outDS
 # end combineBands()
+
+def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
+    """
+    Calculate cost of test dataset with respect to reference dataset 
+    at a given number of pressure levels and for a given set of 
+    components (upwelling flux, net flux, heating rate, etc.). Also keep 
+    other diagnostics normalized to cost of initial 256 g-point k-distribution
+
+    Call
+        costDict = costCalc(
+            lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init)
+
+    Inputs
+        lblDS -- xarray dataset, LBLRTM reference
+        testDS -- xarray dataset, RRTMGP trial dataset (i.e., g-points combined)
+        doLW -- boolean, LW or SW parameters used in cost
+        compNameCF -- string list of cost function component names (e.g., "flux_net")
+        pLevCF -- dictionary; keys for each compNameCF, float iterable (list) values 
+            of pressure levels at which each CF component is evaluated
+        costComp0 -- dictionary; keys for each compNameCF, float scalar values of 
+            initial cost associated with RRTMGP full k-distribution
+        scale -- dictionary; keys for each compNameCF, float scalar values
+        init -- boolean, calculate initial cost i.e., with the full
+            256 g-point k-distribution)
+
+    Outputs
+        dictionary with following keys:
+            allComps -- float array, weighted cost for each 
+                cost function component, normalized WRT cost of full 
+                k-distribution (= 100)
+            totalCost -- float, total of allComps array
+            dCost -- float, change in cost WRT cost of full k-distribution
+            costComps -- dictionary; keys are cost components names, 
+                values are weighted cost at given component and pressure 
+                level, summed over all profiles, normalized with initial cost
+            dCostComps -- dictionary; keys are cost components names, 
+                values are weighted changes in cost at given component and 
+                pressure level, summed over all profiles, normalized with 
+                initial cost
+
+    Keywords
+        None
+    """
+
+    allComps = []
+
+    # add diffuse to SW dataset
+    # should this be done outside of code?
+    # TO DO: BAND DIRECT NO WORKING YET
+    if not doLW:
+        lblDS['flux_dif_net'] = lblDS['flux_dif_dn'] - \
+            lblDS['flux_up']
+
+        if init:
+            testDS['flux_dif_dn'] = testDS['flux_dn'] - \
+                testDS['flux_dir_dn']
+            testDS['flux_dif_net'] = testDS['flux_dif_dn'] - \
+                testDS['flux_up']
+        # endif init
+    # endif LW
+
+    # for diagnostics, we keep the cost and delta-cost for 
+    # each component; in the total cost, we average over profiles 
+    # AND pLevCF, but for diagnostics we break down by pLevCF
+    costComps = {}
+    dCostComps = {}
+
+    # first calculate weighted cost for each component
+    for comp in compNameCF:
+        # pressure dimension will depend on parameter
+        # layer for HR, level for everything else
+        pStr = 'lay' if 'heating_rate' in comp else 'lev'
+
+        if 'forcing' in comp:
+            # assuming comp is following '*_forcing_N' where 
+            # * is the parameter (flux_net, heating_rate, etc.), 
+            # N is the forcing record index
+            iForce = int(comp.split('_')[-1])-1
+           
+            # extract baseline and forcing scenarios
+            # baseline is record 0 (Present Day) or 
+            # 1 (Preindustrial) -- see 
+            # https://github.com/pernak18/g-point-reduction/wiki/LW-Forcing-Number-Convention
+            if not doLW:
+                # keeping minor-19 for Eli (see LW-Forcing-Number-Convention link)
+                # but code iForce needs to be recalibrated
+                if iForce == 18: iForce -= 11
+            # endif doLW
+
+            iBase = 1 if iForce < 7 else 0
+
+            selDict = {'record': iBase, pStr: pLevCF[comp]}
+            bTest = testDS.isel(selDict)
+            bLBL = lblDS.isel(selDict)
+
+            # calculate forcing
+            selDict['record'] = int(iForce)
+            fTest = testDS.isel(selDict)
+            fLBL = lblDS.isel(selDict)
+            testDSf = fTest - bTest
+            lblDSf = fLBL - bLBL
+            subsetErr = testDSf - lblDSf
+
+            # what parameter are we extracting from dataset?
+            if doLW:
+                compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
+            else:
+                if iForce == 7:
+                    compDS = comp.replace('_forcing_19', '')
+                else:
+                    compDS = comp.replace('_forcing_{}'.format(iForce+1), '')
+                # endif iForce
+            # end doLW
+        else:
+            # Compute differences in all variables in datasets at 
+            # levels closest to user-provided pressure levels
+            # particularly important for heating rate since its
+            # vertical dimension is layers and not levels
+            # baseline is record 0 (Garand Present Day)
+            try:
+                # allow for different atmospheric specs 
+                # (PI, PI 2xCH4) to be requested using the 
+                # "param_N" convention with "N" being the forcing
+                # scenario index
+                iForce = int(comp.split('_')[-1])-1
+                compDS = comp.replace('_{}'.format(iForce+1), '')
+            except:
+                # default to present day Garand atm specs
+                iForce = 0
+                compDS = str(comp)
+            # stop trying
+
+            selDict = {'record': iForce, pStr: pLevCF[comp]}
+            subsetErr = (testDS-lblDS).isel(selDict)
+        # endif forcing
+
+        # get array for variable, then compute its test-ref RMS
+        # over all columns at given pressure levels for a given
+        # forcing scenario
+        cfDA = getattr(subsetErr, compDS)**2
+
+        # determine which dimensions over which to average
+        dims = subsetErr[compDS].dims
+        calcDims = ['col', pStr]
+        if 'band' in dims: calcDims.append('band')
+
+        # components will be scaled by their own initial cost
+        costComps[comp] = cfDA.sum(dim=['col'])
+
+        # total cost (sum of compCosts) will be scaled to 100
+        # WRT initial cost to keep HR and Flux in same range
+        compCost = cfDA.sum(dim=calcDims).values * scale[comp]
+        allComps.append(np.sum(compCost))
+        if not init:
+            dCostComps[comp] = (costComps[comp] - costComp0[comp])
+    # end CF component loop
+
+    # now calculate total cost with all components and its 
+    # relative difference from 256 g-point reference cost (scaled to 100)
+    allComps = np.array(allComps)
+    totalCost = allComps.sum()
+    dCost = totalCost - 100
+
+    return {'allComps': allComps, 'totalCost': totalCost, 'dCost': dCost, 
+            'costComps': costComps, 'dCostComps': dCostComps}
+# end costCalc()
 
 class gCombine_kDist:
     def __init__(self, kFile, band, lw, iCombine, 
@@ -314,7 +498,7 @@ class gCombine_kDist:
 
     # end constructor
 
-    def kDistBand(self, combine=False):
+    def kDistBand(self):
         """
         Split a full k-distribution into separate files for a given band 
         (default) or combine g-points in a given band and generate 
@@ -431,7 +615,7 @@ class gCombine_kDist:
                     varShape = contribDS.shape
                     # can't actually have a zero-len dimension, so
                     # we will make fake data
-                    newDim = 1
+                    newDim = self.nWeights
                     newShape = (varShape[0], varShape[1], newDim)
 
                     contribDS = xa.DataArray(
@@ -505,19 +689,19 @@ class gCombine_kDist:
                             # g1 and g2
                             ncDat = xa.where(
                                 ncDat.gpt == g1, w1 + w2, ncDat)
-                        elif ncVar == 'plank_fraction':
-                            # replace g1' weight with integrated weight at
-                            # g1 and g2
-                            pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
-                            ncDat = xa.where(ncDat.gpt == g1, pg1 + pg2, ncDat)
-                            ncDat = ncDat.transpose(*varDims)
-                        else:
+                        elif ncVar in ['kmajor', 'rayl_upper', 'rayl_lower']:
                             # replace g1' slice with weighted average of
                             # g1 and g2;
                             # dimensions get swapped for some reason
                             kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
                                 (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
+                            ncDat = ncDat.transpose(*varDims)
+                        else:
+                            # replace g1' weight with integrated values at
+                            # g1 and g2
+                            pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
+                            ncDat = xa.where(ncDat.gpt == g1, pg1 + pg2, ncDat)
                             ncDat = ncDat.transpose(*varDims)
                         # endif ncVar
 
@@ -547,15 +731,21 @@ class gCombine_kDist:
                     varDims = ncDat.dims
 
                     # no minor absorption contributions
-                    minCond1 = 'upper' in minCon and \
-                        self.iBand in [3, 11, 13, 14, 15]
-                    minCond2 = 'lower' in minCon and self.iBand == 13
+                    if self.doLW:
+                        minCond1 = 'upper' in minCon and \
+                            self.iBand in [3, 11, 13, 14, 15]
+                        minCond2 = 'lower' in minCon and self.iBand == 13
+                    else:
+                        minCond1 = 'upper' in minCon and \
+                            self.iBand in [1, 3, 4, 12, 13]
+                        minCond2 = 'lower' in minCon and self.iBand in [12, 13]
+                    # endif LW                        
 
                     if minCond1 or minCond2:
                         # grab a single, arbitrary slice of the kminor array
                         # and replace it with zeroes (cannot have 0-length 
                         # arrays in RRTMGP)
-                        ncDat = ncDat.where(ncDat[minCon] == 0, drop=True) * 0
+                        ncDat = ncDat.isel({minCon: slice(0, nNew)}) * 0
                     else:
                         for minInt in range(kDS.dims[minIntVar]):
                             dG = minInt*nNew
@@ -584,7 +774,7 @@ class gCombine_kDist:
 
 class gCombine_Cost:
     def __init__(self, bandDict, fullBandFluxes, 
-                fluxesLBL, fluxesRRTMGP, iCombine,
+                fluxesLBL, fluxesRRTMGP, iCombine, lw, 
                 profilesNC=GARAND, exeRRTMGP=EXE, 
                 cleanup=False, 
                 costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
@@ -614,6 +804,7 @@ class gCombine_Cost:
                 underway
 
         Keywords
+            lw -- boolean, do longwave domain (otherwise shortwave)
             profilesNC -- string, path to netCDF with atmospheric profiles
             topDir -- string, path to top level of git repository clone
             exeRRTMGP -- string, path to RRTMGP executable that is run
@@ -639,6 +830,7 @@ class gCombine_Cost:
         self.lblNC = str(fluxesLBL)
         self.rrtmgpNC = str(fluxesRRTMGP)
         self.iCombine = int(iCombine)
+        self.doLW = bool(lw)
         self.profiles = str(profilesNC)
         self.exe = str(exeRRTMGP)
         self.fullBandFluxes = list(fullBandFluxes)
@@ -698,9 +890,6 @@ class gCombine_Cost:
             self.cost0[comp] = []
             self.dCost0[comp] = []
         # end comp loop
-        
-        # normalization factors defined in normCost() method
-        self.norm = []
 
         # cost components -- 1 key per cost variable, values are 
         # nTrial x nCostFuncLevs array; for diagnostics
@@ -719,10 +908,6 @@ class gCombine_Cost:
 
         # have we arrived at our final optimization?
         self.optimized = False
-
-        # original g-point IDs for a given band
-        # TO DO: have not started trying to preserve these guys
-        #self.gOrigID = range(1, self.nGpt+1)
     # end constructor
 
     def kMap(self):
@@ -770,8 +955,8 @@ class gCombine_Cost:
         # using processes (slower, separate memory) instead of threads
         #print('Calculating fluxes')
         with multiprocessing.Pool(NCORES) as pool:
-            result = pool.starmap_async(fluxCompute, argsMap)
-            # TO DO: is order preserved?
+            result = pool.starmap_async(fluxCompute, argsMap, chunksize=CHUNK)
+            # is order preserved?
             # https://stackoverflow.com/a/57725895 => yes
             self.trialDS = result.get()
         # endwith
@@ -793,28 +978,32 @@ class gCombine_Cost:
         # will be combined accordingly with single-band g-point combinations
         fullDS = []
         for bandNC in self.fullBandFluxes:
-            with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
+            with xa.open_dataset(bandNC) as bandDS:
+                bandDS.load()
+                fullDS.append(bandDS)
+            # end with
+        # end bandNC loop
 
         #print('Combining trial fluxes with full-band fluxes')
 
         # trial = g-point combination
         argsMap = []
         for iBand, trial in zip(bandIDs, self.trialDS):
-            argsMap.append((iBand, fullDS, trial))
+            argsMap.append((iBand, fullDS, trial, self.doLW, False))
 
         with multiprocessing.Pool(NCORES) as pool:
-            result = pool.starmap_async(combineBands, argsMap)
-            # TO DO: is order preserved?
+            result = pool.starmap_async(combineBands, argsMap, chunksize=CHUNK)
+            # is order preserved?
             # https://stackoverflow.com/a/57725895 => yes
             self.combinedDS = result.get()
         # endwith
     # end fluxCombine()
 
-    def costFuncComp(self, init=False, normOption=0):
+    def costFuncComp(self, init=False):
         """
         Calculate flexible cost function where RRTMGP-LBLRTM RMS error for
         any number of allowed parameters (usually just flux or HR) over many
-        levels is computed. If self.norm is empty
+        levels is computed.
 
         Input
             testDS -- xarray Dataset with RRTMGP fluxes
@@ -822,13 +1011,26 @@ class gCombine_Cost:
         Keywords
             init -- boolean, evalulate the cost function for the initial, 
                 full g-point k-distribution
-            normOption -- int; ID for different normalization techniques
-                (not implemented)
-
-        Time consuming. Parallizeable?
         """
 
+        from itertools import repeat
+
         #print('Calculating cost for each trial')
+
+        if init:
+            with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
+        else:
+            allDS = list(self.combinedDS)
+        # endif init
+
+        # normalize to get HR an fluxes on same scale
+        # so each cost component has its own scale to 100
+        scale = {}
+        for comp, weight in zip(self.compNameCF, self.costWeights):
+            scale[comp] = 1 if init else weight * 100 / self.cost0[comp][0]
+
+        lblDS = xa.open_dataset(self.lblNC)
+        lblDS.load()
 
         for comp in self.compNameCF:
             # locally, we'll average over profiles AND pLevCF, but 
@@ -838,109 +1040,49 @@ class gCombine_Cost:
         # end comp loop
 
         if init:
-            with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
+            # initial cost calculation; used for scaling -- 
+            # how did cost change relative to original 256 g-point cost
+            costDict = costCalc(
+                lblDS, allDS[0], self.doLW, self.compNameCF, 
+                self.pLevCF, self.costComp0, scale, True)
+
+            self.costComps = dict(costDict['costComps'])
+            self.dCostComps = dict(costDict['dCostComps'])
+
+            # if we have an empty dictionary for the initial cost 
+            # components, assign to it what should be the cost from the 
+            # full k-distribution (for which 
+            # there should only be 1 element in the list)
+            for iComp, comp in enumerate(self.compNameCF):
+                self.cost0[comp].append(costDict['allComps'][iComp])
+                self.costComp0[comp] = self.costComps[comp]
+            # end component loop
         else:
-            allDS = list(self.combinedDS)
+            # trial = g-point combination
+            # set up arguments for parallelization
+            argsMap = []
+            for testDS in allDS: argsMap.append(
+                (lblDS, testDS, self.doLW, self.compNameCF, 
+                 self.pLevCF, self.costComp0, scale, False))
+
+            # parallize cost calculation for trials and extract output
+            with multiprocessing.Pool(NCORES) as pool:
+                result = pool.starmap_async(costCalc, argsMap, chunksize=CHUNK)
+                # is order preserved?
+                # https://stackoverflow.com/a/57725895 => yes
+                allCostDict = result.get()
+            # endwith
+
+            for iDict, costDict in enumerate(allCostDict):
+                self.totalCost.append(costDict['totalCost'])
+                self.dCost.append(costDict['dCost'])
+                for comp in self.compNameCF:
+                    self.costComps[comp].append(costDict['costComps'][comp])
+                    self.dCostComps[comp].append(costDict['dCostComps'][comp])
+                # end comp loop
         # endif init
 
-        with xa.open_dataset(self.lblNC) as lblDS:
-            for iDS, testDS in enumerate(allDS):
-                allComps = []
-
-                for comp, weight in zip(self.compNameCF, self.costWeights):
-                    # pressure dimension will depend on parameter
-                    # layer for HR, level for everything else
-                    pStr = 'lay' if 'heating_rate' in comp else 'lev'
-
-                    if 'forcing' in comp:
-                        # extract baseline and forcing scenarios
-                        # baseline is record 1 (Preindustrial)
-                        selDict = {'record': 1, pStr: self.pLevCF[comp]}
-                        bTest = testDS.isel(selDict)
-                        bLBL = lblDS.isel(selDict)
-                        
-                        # assuming comp is following '*_forcing_N' where 
-                        # * is the parameter (flux_net, heating_rate, etc.), 
-                        # N is the forcing record index
-                        iForce = int(comp.split('_')[-1])
-
-                        # calculate forcing
-                        selDict['record'] = int(iForce)
-                        fTest = testDS.isel(selDict)
-                        fLBL = lblDS.isel(selDict)
-                        testDSf = fTest - bTest
-                        lblDSf = fLBL - bLBL
-                        subsetErr = testDSf-lblDSf
-
-                        # what parameter are we extracting from netCDF?
-                        compDS = comp.replace('_forcing_{}'.format(iForce), '')
-                    else:
-                        # Compute differences in all variables in datasets at 
-                        # levels closest to user-provided pressure levels
-                        # particularly important for heating rate since its
-                        # vertical dimension is layers and not levels
-                        # baseline is record 0 (Garand Present Day)
-                        try:
-                            # allow for different atmospheric specs 
-                            # (PI, PI 2xCH4) to be requested using the 
-                            # "param_N" convention with "N" being the forcing
-                            # scenario index
-                            iForce = int(comp.split('_')[-1])
-                            compDS = comp.replace('_{}'.format(iForce), '')
-                        except:
-                            # default to present day Garand atm specs
-                            iForce = 0
-                            compDS = str(comp)
-                        # stop trying
-
-                        selDict = {'record': iForce, pStr: self.pLevCF[comp]}
-                        subsetErr = (testDS-lblDS).isel(selDict)
-                    # endif forcing
-
-                    # get array for variable, then compute its test-ref RMS
-                    # over all columns at given pressure levels for a given
-                    # forcing scenario
-                    cfDA = getattr(subsetErr, compDS)**2
-
-                    # determine which dimensions over which to average
-                    dims = subsetErr[compDS].dims
-                    calcDims = ['col', pStr]
-                    if 'band' in dims: calcDims.append('band')
-
-                    # normalize to get HR an fluxes on same scale
-                    # so each cost component has its own scale to 100
-                    scale = 1 if init else weight * 100 / self.cost0[comp][0]
-
-                    # components will be scaled by their own initial cost
-                    self.costComps[comp].append(cfDA.sum(dim=['col']))
-
-                    # total cost (sum of compCosts) will be scaled to 100
-                    # WRT initial cost to keep HR and Flux in same range
-                    compCost = cfDA.sum(dim=calcDims).values * scale
-                    allComps.append(np.sum(compCost))
-                    if not init:
-                        self.dCostComps[comp].append(
-                            (self.costComps[comp][-1] - self.costComp0[comp]))
-                    # endif init
-                # end ncVar loop
-
-                allComps = np.array(allComps)
-
-                if init:
-                    # if we have an empty dictionary for the initial cost 
-                    # components, assign to it what should be the cost from the 
-                    # full k-distribution (for which 
-                    # there should only be 1 element in the list)
-                    for iComp, comp in enumerate(self.compNameCF):
-                        self.cost0[comp].append(allComps[iComp])
-                        self.costComp0[comp] = self.costComps[comp][0]
-                else:
-                    totalCost = allComps.sum()
-                    self.totalCost.append(totalCost)
-                    self.dCost.append(totalCost - 100)
-                # endif init
-            # end testDS loop
-        # endwith LBLDS
+        lblDS.close()
     # end costFuncComp
 
     def findOptimal(self):
@@ -964,9 +1106,12 @@ class gCombine_Cost:
             # is possible
             self.fluxInputsAll.pop(self.iOpt)
             self.combinedDS.pop(self.iOpt)
-            #self.norm.pop(self.iOpt)
             self.totalCost.pop(self.iOpt)
             self.dCost.pop(self.iOpt)
+            for comp in self.compNameCF:
+                self.costComps[comp].pop(self.iOpt)
+                self.dCostComps[comp].pop(self.iOpt)
+            # end comp loop
 
             # no more trial to consider
             if len(self.totalCost) == 0:
@@ -987,17 +1132,6 @@ class gCombine_Cost:
         shutil.copyfile(optNC, cpNC)
         self.optNC = str(cpNC)
         #print('Saved optimal combination to {}'.format(cpNC))
-
-        # determine optimal combination and grab g-point combination attribute
-        # TO DO: try to preserve more metadata (iteration, band, combined gs) 
-        # from optimized solution
-        """
-        with xa.open_dataset(self.optNC) as optDS:
-            self.gCombine['iter{:02d}'.format(iCombine)] = \
-              optDS.attrs['g_combine']
-
-        for i in self.gCombine.keys(): print(self.gCombine[i])
-        """
     # end findOptimal()
 
     def costDiagnostics(self):
@@ -1103,7 +1237,6 @@ class gCombine_Cost:
         self.fluxInputsAll = []
         self.combinedDS = []
         self.dCost = []
-        self.norm = []
         self.totalCost = []
         self.optBand = None
         self.optNC = None
@@ -1126,8 +1259,8 @@ class gCombine_Cost:
 
         # what netCDF variables have a g-point dimension and will thus
         # need to be modified in the combination iterations?
-        # TO DO: need SW
-        kMajor = ['kmajor', 'plank_fraction']
+        kMajor = list(self.distBands['band01'].kMajVars)
+        kMajor.remove('gpt_weights')
 
         # kminor variables that are nontrivial to combine
         # for minor contributors
@@ -1145,19 +1278,24 @@ class gCombine_Cost:
                    'absorption_coefficient_ref_T', 
                    'press_ref_trop']
 
+        # no contributions in a given band
+        upNoBandMinor = [3, 11, 13, 14, 15] if self.doLW else \
+            [1, 3, 4, 12, 13]
+        loNoBandMinor = [13] if self.doLW else [12, 13]
+
+        nBands = 16 if self.doLW else 14
         nGpt = []
 
         # number of minor contributors per band
-        nPerBandUp = np.zeros(16).astype(int)
-        nPerBandLo = np.zeros(16).astype(int)
+        nPerBandUp = np.zeros(nBands).astype(int)
+        nPerBandLo = np.zeros(nBands).astype(int)
         for iNC, ncFile in enumerate(ncFiles):
             with xa.open_dataset(ncFile) as kDS:
                 sizeDS = kDS.sizes
                 nGpt.append(sizeDS['gpt'])
                 ncVars = list(kDS.keys())
                 for ncVar in ncVars:
-                    # don't know what to do with this! for the full band file, 
-                    # we probably don't need it anymore
+                    # for the full band file, we probably don't need it anymore
                     if ncVar == 'gpt_weights': continue
 
                     varDA = kDS[ncVar]
@@ -1172,12 +1310,12 @@ class gCombine_Cost:
                     # endif empty var
 
                     # minor contributors coming back to haunt me
-                    # no contributions in a given band
                     minCond1 = ('minor_absorber_intervals_upper' in varDims or \
                         'contributors_upper' in varDims) and \
-                        iNC in [3, 11, 13, 14, 15]
+                        iNC in upNoBandMinor
                     minCond2 = ('minor_absorber_intervals_lower' in varDims or \
-                        'contributors_lower' in varDims) and iNC == 13
+                        'contributors_lower' in varDims) and \
+                        iNC in loNoBandMinor
                     if minCond1 or minCond2: continue
 
                     vDim = 'minor_absorber_intervals_upper'
@@ -1312,7 +1450,9 @@ class gCombine_Cost:
         for bandNC in self.fullBandFluxes:
             with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
-        finalDS = combineBands(0, fullDS, fullDS[0], finalDS=True)
+        finalDS = combineBands(0, fullDS, fullDS[0], self.doLW, finalDS=True)
+        finalDS.heating_rate.attrs['units'] = 'K/s'
+        finalDS.band_heating_rate.attrs['units'] = 'K/s'
         finalDS.to_netcdf(fluxOutNC)
     # end calcOptFlux()
 # end gCombine_Cost
