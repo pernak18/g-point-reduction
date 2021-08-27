@@ -47,10 +47,10 @@ if __name__ == '__main__':
     # endif RRTMGP
   else:
     iSort = [0] + list(range(13, 19)) + [12] + list(range(1, 12))
+
   # endif sw
 
   ncFiles = np.array(ncFiles)[iSort]
-
   # add record coordinate dimension to each dataset; write temp netcdf
   print('Adding record dimension (creating temporary files)')
   for iNC, nc in enumerate(ncFiles):
@@ -72,8 +72,8 @@ if __name__ == '__main__':
   newDS = newDS.fillna(0)
 
   # older files have the dimensions switched for these guys
-  newDims = ('record', 'band', 'pair')
-  newDS['band_lims_wvn'] = newDS['band_lims_wvn'].transpose(*newDims)
+  #newDims = ('record', 'band', 'pair')
+  #newDS['band_lims_wvn'] = newDS['band_lims_wvn'].transpose(*newDims)
 
   newDS.to_netcdf(outNC)
   print('Wrote {}'.format(outNC))
