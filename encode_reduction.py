@@ -68,6 +68,12 @@ if __name__ == '__main__':
                 outDS[ncVar].encoding['dtype'] = bDS[ncVar].encoding['dtype']
             # endif ncVar
         # end ncVar loop
+        if args.shortwave:
+            outDS['tsi_default'] = tsi_default
+            outDS['mg_default'] = mg_default
+            outDS['sb_default'] = sb_default
+        # endif SW 
+
         outDS.to_netcdf(outFile, encoding=encode, format='NETCDF3_CLASSIC')
     # endwith
 
