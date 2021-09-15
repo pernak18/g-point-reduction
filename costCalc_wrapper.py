@@ -31,9 +31,11 @@ COMPS = ['flux_net', 'band_flux_net', 'heating_rate',
   'flux_net_forcing_17', 'flux_net_forcing_18']
 
 # Eli SW
+"""
 COMPS = ['flux_dif_net', 'flux_dir_dn', 'heating_rate',
   'heating_rate_7', 'flux_net_forcing_5', 'flux_net_forcing_6',
   'flux_net_forcing_7', 'flux_net_forcing_19']
+"""
 
 # 1 level key must exist for each COMPS string
 # indices of pressure levels to use in cost calculation
@@ -59,6 +61,7 @@ LEVELS['flux_net_forcing_17'] = [0, 26, 42]
 LEVELS['flux_net_forcing_18'] = [0, 26, 42]
 
 # Eli SW
+"""
 LEVELS = {}
 LEVELS['flux_dif_net'] = [0, 26, 42]
 LEVELS['flux_dir_dn'] = range(42)
@@ -68,6 +71,7 @@ LEVELS['flux_net_forcing_5'] = [0,42]
 LEVELS['flux_net_forcing_6'] = [0,42]
 LEVELS['flux_net_forcing_7'] = [0,42]
 LEVELS['flux_net_forcing_19'] = [0,42]
+"""
 
 # 1 weight per COMPS string
 # Eli LW
@@ -76,7 +80,7 @@ WEIGHTS =  [0.6, 0.04, 0.12, 0.12, 0.01, 0.02, 0.04, 0.005,
             0.005]
 
 # Eli SW
-WEIGHTS = [0.1, 0.6, 0.05, 0.05, 0.02, 0.05, 0.11, 0.02]
+#WEIGHTS = [0.1, 0.6, 0.05, 0.05, 0.02, 0.05, 0.11, 0.02]
 
 if __name__ == '__main__':
   import argparse
@@ -110,7 +114,7 @@ if __name__ == '__main__':
 
   doLW = not args.sw
 
-  scale, cost0, totalCost = {}, {}, {}
+  scale, cost0, totalCost, costComps = {}, {}, {}, {}
 
   # normalize to get HR an fluxes on same scale
   # so each cost component has its own scale to 100
@@ -130,7 +134,11 @@ if __name__ == '__main__':
       cost0[comp] = costDict['allComps'][iComp]
 
     # save total cost for full k configuration
-    totalCost['Full_k'] = costDict['totalCost']
+    costKey = 'Full_k'
+    totalCost[costKey] = costDict['totalCost']
+    costComps[costKey] = {}
+    for comp in COMPS:
+      costComps[costKey][comp] = costDict['costComps'][comp].sum().values
   # endwith
 
   # now use initial cost in normalization
@@ -146,8 +154,15 @@ if __name__ == '__main__':
         rDS, oDS, doLW, COMPS, LEVELS, cost0, scale, isInit)
     # endwith
 
+    print(other)
+
     # TO DO: will wanna label better
-    totalCost[os.path.basename(other)] = costDict['totalCost']
+    costKey = os.path.basename(other)
+    totalCost[costKey] = costDict['totalCost']
+    costComps[costKey] = {}
+    for comp in COMPS:
+      costComps[costKey][comp] = costDict['costComps'][comp].sum().values
+
   # end path loop
 
   # TO DO: save to a file? CSV?
@@ -155,4 +170,9 @@ if __name__ == '__main__':
   for key in totalCost.keys():
     norm = '(Non-normalized)' if 'Full_k' in key else '(Normalized)'
     print('{:100s}{:10.3f} {:s}'.format(key, totalCost[key], norm))
+    for iComp, comp in enumerate(COMPS):
+      if 'Full_k' in key:
+        print('{:>100s}{:10.3f}'.format(comp, costComps[key][comp]))
+      else:
+        print('{:>100s}{:10.3f}'.format(comp, scale[comp]*costComps[key][comp]))
 # endif main()
