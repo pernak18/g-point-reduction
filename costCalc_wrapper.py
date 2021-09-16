@@ -172,7 +172,7 @@ if __name__ == '__main__':
     print('{:100s}{:10.3f} {:s}'.format(key, totalCost[key], norm))
     for iComp, comp in enumerate(COMPS):
       if 'Full_k' in key:
-        print('{:>100s}{:10.3f}'.format(comp, costComps[key][comp]))
+        print('{:>100s}{:10.3e}'.format(comp, costComps[key][comp]))
       else:
-        print('{:>100s}{:10.3f}'.format(comp, scale[comp]*costComps[key][comp]))
+        print('{:>100s}{:10.3f}'.format(comp, costComps[key][comp] * 100 / cost0[comp]))
 # endif main()
