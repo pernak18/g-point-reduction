@@ -3,13 +3,14 @@
 import os, sys, shutil, glob, pickle, copy
 
 os.chdir('/global/u1/p/pernak18/RRTMGP/g-point-reduction')
+os.chdir('/global/u2/k/kcadyper/g-point-reduction')
 
 # "standard" install
 import numpy as np
 
 # directory in which libraries installed with conda are saved
 PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-    'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
+    'lib/python3.8/site-packages'
 PATHS = ['common', PIPPATH]
 for path in PATHS: sys.path.append(path)
 
@@ -32,6 +33,7 @@ BANDSPLITDIR = 'band_k_dist'
 FULLBANDFLUXDIR = 'full_band_flux'
 
 CWD = os.getcwd()
+print (CWD)
 
 # only do one domain or the other
 DOLW = True
@@ -41,18 +43,21 @@ NBANDS = 16 if DOLW else 14
 
 # remove the netCDFs that are generated for all of the combinations 
 # and iterations of combinations in bandOptimize()
-CLEANUP = False
+CLEANUP = True
 
 kFiles = sorted(glob.glob('{}/coefficients_{}_band??.nc'.format(
         BANDSPLITDIR, DOMAIN)))
+print (len(kFiles))
 
-test = False
+test = True
 
 # this should be parallelized; also is part of preprocessing so we 
 # shouldn't have to run it multiple times
 kBandDict = {}
 for iBand, kFile in enumerate(kFiles):
-    if test and iBand != 0: continue
+    print(iBand)
+    print (kFile)
+    #if test and iBand != 0: continue
     band = iBand + 1
     kObj = BYBAND.gCombine_kDist(kFile, iBand, DOLW, 1, 
         fullBandKDir=BANDSPLITDIR, 

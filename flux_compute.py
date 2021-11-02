@@ -2,16 +2,18 @@
 
 import os, sys, shutil, glob, pickle, copy, time
 
-os.chdir('/global/u1/p/pernak18/RRTMGP/g-point-reduction')
+os.chdir('/global/u2/k/kcadyper/g-point-reduction/')
 
 # "standard" install
 import numpy as np
 
 from multiprocessing import Pool
 
+import pathlib as PL
+
 # directory in which libraries installed with conda are saved
 PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-    'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
+    'lib/python3.8/site-packages'
 PATHS = ['common', PIPPATH]
 for path in PATHS: sys.path.append(path)
 
@@ -159,14 +161,15 @@ CFWGT = [0.6, 0.04, 0.12, 0.12,
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
 
-with open('{}_k-dist.pickle'.format(DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
+#with open('{}_k-dist.pickle'.format(DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
+with open('{}/{}_k-dist.pickle'.format(os.getcwd(), DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
 
 CFDIR = 'sfc_tpause_TOA_band_flux_up_down'
 CFDIR = 'salami'
 CFDIR = 'direct-down'
 CFDIR = 'xsecs_test_eli'
 
-RESTORE = True
+RESTORE = False
 pickleCost = '{}_cost-optimize.pickle'.format(DOMAIN)
 
 if RESTORE:
@@ -182,10 +185,13 @@ else:
 # endif RESTORE
 
 # number of iterations for the optimization
-NITER = 149
+coSave = ' '
+NITER = 7
+print (coObj.iCombine)
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
     t1 = time.process_time()
+
 
     wgtInfo = ['{:.2f} ({})'.format(
         wgt, comp) for wgt, comp in zip(CFWGT, CFCOMPS)]
@@ -211,13 +217,66 @@ for i in range(coObj.iCombine, NITER+1):
 
     temp = time.process_time()
     coObj.findOptimal()
-    print(len(coObj.totalCost))
 #     print('findOptimal: {:.4f}'.format(time.process_time()-temp))
+
+
+    print(len(coObj.totalCost))
+    print(coObj.dCost[coObj.iOpt])
 
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
+    print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
+
+    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -1.3:
+    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 2.00:
+       print ('will change here')
+       sys.exit()
+       bandObj = coObj.distBands
+       bandKey='band0{}'.format(coObj.optBand+1)
+       #sys.exit() 
+       newObj = BYBAND.gCombine_kDist(bandObj[bandKey].kInNC, coObj.optBand, DOLW,
+            bandObj[bandKey].iCombine, fullBandKDir=BANDSPLITDIR,
+            fullBandFluxDir=FULLBANDFLUXDIR)
+       curkFile = os.path.basename(coObj.optNC)
+       ind = curkFile.find('_g')
+       g1 = int(curkFile[ind+2:ind+4])
+       g2 = int(curkFile[ind+5:ind+7])
+       gCombine =[[g1-1,g2-1]]
+
+       print  ("   ")
+       print (newObj.workDir)
+       ind = curkFile.find('coeff')
+       print (curkFile)
+       fluxPath = PL.Path(curkFile[ind:]).with_suffix('')
+       fluxDir = '{}/{}'.format(newObj.workDir,fluxPath)
+
+       parr =['plus','minus']
+       for pmFlag in parr:
+           print ("  ")
+           print (pmFlag)
+           newObj.gPointCombineSglPair(pmFlag,gCombine)
+           newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
+           fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
+           print (fluxFile)
+           print (newCoefFile)
+           BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
+
+           trialNC = '{}/{}'.format(fluxDir,fluxFile)
+           coObj.combinedDS = BYBAND.combineBandsSgl(coObj.optBand, 
+                   DOLW,trialNC,coObj.fullBandFluxes) 
+           coObj.costFuncComp(init=True)
+           coObj.costFuncComp()
+           print(len(coObj.totalCost))
+           print(coObj.dCost[coObj.iOpt])
+
+           if DIAGNOSTICS: coObj.costDiagnostics()
+           print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
+    
     coObj.setupNextIter()
+    for bandNc in coObj.fullBandFluxes:
+        print ("in bandNc loop ",bandNc)
+
 
     temp = time.process_time()
     with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)

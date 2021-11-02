@@ -224,6 +224,135 @@ def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
     return outDS
 # end combineBands()
 
+def combineBandsSgl(iBand, lw, trialNC,fullBandFluxes,finalDS=False):
+    """
+    Combine a given trial fluxes dataset in a given band with the full-band 
+    fluxes from the rest of the bands
+
+    Call
+        outDS = combineBands(iBand, trialNC,fullBandFluxes)
+    
+    Input
+        iBand -- int, zero-offset band number that was modified (i.e., 
+            band for which g-points were combined)
+        trialNC -- string, netCDF file with fluxes for band where 
+            g-points were combined
+        fullBandFLuxes - list of nectdf files with full-band fluxes 
+            for each band that was not modified
+        lw -- boolean, longwave instead of shortwave flux 
+            parameters saved to output netCDF
+    
+    Keywords
+        finalDS -- boolean, merge all bands together after full 
+            optimization is complete
+        
+    Output
+        outDS -- xarray Dataset, fluxes for all bands
+    """
+
+    bandVars = ['flux_up', 'flux_dn', 'flux_net', 'heating_rate', 
+                'emis_sfc', 'band_lims_wvn']
+    fluxVars = bandVars[:4]
+    if not lw:
+        bandVars.append('flux_dir_dn')
+        fluxVars.append('flux_dir_dn')
+    # end shortWave
+
+    inBand = int(iBand)
+    outDS = xa.Dataset()
+
+    # If trial data and flux data are  coming in as NC, store in xarray
+    with xa.open_dataset(trialNC) as trialDS:
+            trialDS.load()
+
+    fullDS = []
+    for bandNC in fullBandFluxes:
+        print ("in bandNC loop ",bandNC)
+        with xa.open_dataset(bandNC) as bandDS:
+            bandDS.load()
+            fullDS.append(bandDS)
+        # end with
+    # end bandNC loop
+
+    nForce = fullDS[0].sizes['record']
+
+    # replace original fluxes for trial band with modified one
+    fluxesMod = list(fullDS)
+    if not finalDS: fluxesMod[iBand] = trialDS
+    nBands = len(fullDS)
+
+    # TO DO: consider xarray.merge()
+    ncVars = list(trialDS.keys())
+    for ncVar in ncVars:
+        if ncVar in bandVars:
+            # concat variables on the band dimension
+            modDS = [bandDS[ncVar] for bandDS in fluxesMod]
+            outDat = xa.concat(modDS, 'band')
+
+            # add record/forcing dimension
+            if ncVar == 'emis_sfc':
+                newDims = ('record', 'col', 'band')
+            elif ncVar == 'band_lims_wvn':
+                newDims = ('record', 'band', 'pair')
+                outDat = outDat.expand_dims(
+                    dim={'record': nForce}, axis=0)
+            else:
+                if ncVar == 'heating_rate':
+                    pDim = 'lay'
+                else:
+                    pDim = 'lev'
+                # endif HR
+
+                newDims = ('record', pDim, 'col', 'band')
+            # endif newDims
+
+            outDat = outDat.transpose(*newDims)
+        elif ncVar == 'band_lims_gpt':
+            gptLims = []
+            for iBand, bandDS in enumerate(fluxesMod):
+                bandLims = bandDS['band_lims_gpt'].squeeze()
+                if iBand == 0:
+                    gptLims.append(bandLims)
+                else:
+                    offset = gptLims[-1][1]
+                    gptLims.append(bandLims+offset)
+                # endif iBand
+            # end band loop
+
+            # add record/forcing dimension
+            modDims = {'record': np.arange(nForce), 
+                       'band': np.arange(nBands), 
+                       'pair': np.arange(2)}
+            outDat = xa.DataArray(
+                [gptLims] * nForce, dims=modDims)
+        else:
+            # retain any variables with no band dimension
+            outDat = trialDS[ncVar]
+        # endif ncVar
+
+        outDS[ncVar] = outDat
+    # end ncVar loop
+
+    if not lw:
+        outDS['flux_dif_dn'] = outDS['flux_dn'] - outDS['flux_dir_dn']
+        outDS['flux_dif_net'] = outDS['flux_dif_dn'] - outDS['flux_up']
+        fluxVars.append('flux_dif_dn')
+        fluxVars.append('flux_dif_net')
+    # endif LW
+
+    # calculate broadband fluxes
+    for fluxVar in fluxVars:
+        pDim = 'lay' if 'heating_rate' in fluxVar else 'lev'
+        dimsBB = ('record', pDim, 'col')
+        outDS = outDS.rename({fluxVar: 'band_{}'.format(fluxVar)})
+        broadband = outDS['band_{}'.format(
+            fluxVar)].sum(dim='band')
+        outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
+    # end fluxVar loop
+
+    return outDS
+# end combineBandsSgl()
+
 def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
     """
     Calculate cost of test dataset with respect to reference dataset 
@@ -770,6 +899,143 @@ class gCombine_kDist:
             # end combination loop
         # endwith kDS
     # end gPointCombine()
+    def gPointCombineSglPair(self,pmFlag,gCombine):
+        """
+        Combine g-points in a given band with adjacent g-point and
+        store into a netCDF for further processing
+        """
+
+        with xa.open_dataset(self.kInNC) as kDS:
+            kVal = kDS.kmajor
+            weights = kDS.gpt_weights
+            ncVars = list(kDS.keys())
+
+            # combine all nearest neighbor g-point indices
+            # and associated weights for given band
+            nNew = kDS.dims['gpt']-1
+            wCombine = [weights[np.array(gc)] for gc in gCombine]
+
+            for gc, wc in zip(gCombine, wCombine):
+                g1, g2 = gc
+                w1, w2 = wc
+
+                # loop over each g-point combination and create
+                # a k-distribution netCDF for each
+                gCombStr = 'g{:02d}-{:02d}_iter{:03d}'.format(
+                    g1+1, g2+1, self.iCombine)
+                outNC='{}/coefficients_{}_{}_{}.nc'.format(
+                    self.workDir, self.domainStr, gCombStr,pmFlag)
+                self.trialNC.append(outNC)
+                self.gCombStr.append(gCombStr)
+                print (outNC)
+
+                outDS = xa.Dataset()
+
+                # each trial netCDF has its own set of g-points
+                # that we will save for metadata purposes --
+                # the combination that optimizes the cost function
+                # will have its `g_combine` attribute perpetuated
+                # append g-point combinations metadata for given
+                # band and iteration in given band
+                outDS.attrs['g_combine'] = '{}+{}'.format(g1+1, g2+1)
+
+                x0 = 0.005
+                if pmFlag == 'plus' :
+                    nscale = 1
+                else:
+                    nscale=-1
+                for ncVar in ncVars:
+                    ncDat = xa.DataArray(kDS[ncVar])
+                    varDims = ncDat.dims
+                    if ncVar in self.kMajVars:
+                        if ncVar == 'gpt_weights':
+                            # replace g1' weight with integrated weight at
+                            # g1 and g2
+                            ncDat = xa.where(
+                                ncDat.gpt == g1, w1 + w2, ncDat)
+                        elif ncVar in ['kmajor', 'rayl_upper', 'rayl_lower']:
+                            # replace g1' slice with weighted average of
+                            # g1 and g2;
+                            # dimensions get swapped for some reason
+                            delta = x0*nscale
+                            kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
+                            ncDat = xa.where(ncDat.gpt == g1,
+                                (kg1*w1*(1+delta) + kg2*w2*(1-delta)) / (w1 + w2), ncDat)
+                            ncDat = ncDat.transpose(*varDims)
+                        else:
+                            # replace g1' weight with integrated values at
+                            # g1 and g2
+                            pg1, pg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
+                            ncDat = xa.where(ncDat.gpt == g1, pg1 + pg2, ncDat)
+                            ncDat = ncDat.transpose(*varDims)
+                        # endif ncVar
+
+                        # remove the g2 slice; weird logic:
+                        # http://xarray.pydata.org/en/stable/generated/
+                        # xarray.DataArray.where.html#xarray.DataArray.where
+                        ncDat = ncDat.where(ncDat.gpt != g2, drop=True)
+                    elif ncVar in self.kMinorLims + ['bnd_limits_gpt']:
+                        ncDat[:] = [1, nNew]
+                    elif ncVar in self.kMinor:
+                        continue
+                    else:
+                        # retain any variables without a gpt dimension
+                        pass
+                    # endif ncVar
+
+                    # stuff new dataset with combined or unaltered data
+                    outDS[ncVar] = xa.DataArray(ncDat)
+                # end ncVar loop
+
+                # some minor contributor variables need to be done after 
+                # the ncVar loop because g-points need to be combined
+                for iVar, minIntVar in enumerate(self.kMinorInt):
+                    minCon = self.kMinorContrib[iVar]
+                    kMinor = self.kMinor[iVar]
+                    ncDat = kDS[kMinor]
+                    varDims = ncDat.dims
+
+                    # no minor absorption contributions
+                    if self.doLW:
+                        minCond1 = 'upper' in minCon and \
+                            self.iBand in [3, 11, 13, 14, 15]
+                        minCond2 = 'lower' in minCon and self.iBand == 13
+                    else:
+                        minCond1 = 'upper' in minCon and \
+                            self.iBand in [1, 3, 4, 12, 13]
+                        minCond2 = 'lower' in minCon and self.iBand in [12, 13]
+                    # endif LW                        
+
+                    if minCond1 or minCond2:
+                        # grab a single, arbitrary slice of the kminor array
+                        # and replace it with zeroes (cannot have 0-length 
+                        # arrays in RRTMGP)
+                        ncDat = ncDat.isel({minCon: slice(0, nNew)}) * 0
+                    else:
+                        for minInt in range(kDS.dims[minIntVar]):
+                            dG = minInt*nNew
+                            cg1, cg2 = g1 + dG, g2 + dG
+                            kg1 = ncDat.isel({minCon: cg1})
+                            kg2 = ncDat.isel({minCon: cg2})
+
+                            ncDat = xa.where(ncDat[minCon] == cg1,
+                                (kg1*w1 + kg2*w2) / (w1 + w2), ncDat)
+                            ncDat = ncDat.where(ncDat[minCon] != cg2, 
+                                drop=True)
+                            ncDat = ncDat.transpose(*varDims)
+                        # end interval loop
+                    # endif no absorption
+                    outDS[kMinor] = xa.DataArray(ncDat)
+                # end interval variable loop
+
+                for minStart, minLim in zip(self.kMinorStart, self.kMinorLims):
+                    outDS[minStart] = outDS[minLim][:,1].cumsum()-nNew+1
+                    
+                outDS.to_netcdf(outNC, 'w')
+            # end combination loop
+        # endwith kDS
+    # end gPointCombineSgl()
+# end gCombine_kDist
 # end gCombine_kDist
 
 class gCombine_Cost:
@@ -999,6 +1265,7 @@ class gCombine_Cost:
         # endwith
     # end fluxCombine()
 
+
     def costFuncComp(self, init=False):
         """
         Calculate flexible cost function where RRTMGP-LBLRTM RMS error for
@@ -1141,15 +1408,15 @@ class gCombine_Cost:
 
         # offset: dCost from previous iteration; only needed for diagnostics
         if self.iCombine > 1:
-            dCost0 = [self.dCost0[comp][-1] for comp in self.compNameCF]
-            dCost0 = sum(dCost0)
+            self.deltaCost0 = [self.dCost0[comp][-1] for comp in self.compNameCF]
+            self.deltaCost0 = sum(self.deltaCost0)
         else:
-            dCost0 = 0
+            self.deltaCost0 = 0
         # endif iCombine
 
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
             os.path.basename(self.optNC), self.iOpt+1, 
-            self.totalCost[self.iOpt], (self.dCost[self.iOpt] - dCost0)))
+            self.totalCost[self.iOpt], (self.dCost[self.iOpt] - self.deltaCost0)))
 
         diagDir = '{}/diagnostics'.format(self.optDir)
         pathCheck(diagDir, mkdir=True)
