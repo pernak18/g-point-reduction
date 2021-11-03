@@ -186,7 +186,7 @@ else:
 
 # number of iterations for the optimization
 coSave = ' '
-NITER = 7
+NITER = 4
 print (coObj.iCombine)
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
@@ -228,10 +228,9 @@ for i in range(coObj.iCombine, NITER+1):
 
     print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
 
-    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -1.3:
-    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 2.00:
+    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
+    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 2.00:
        print ('will change here')
-       sys.exit()
        bandObj = coObj.distBands
        bandKey='band0{}'.format(coObj.optBand+1)
        #sys.exit() 
@@ -263,8 +262,8 @@ for i in range(coObj.iCombine, NITER+1):
            BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
-           coObj.combinedDS = BYBAND.combineBandsSgl(coObj.optBand, 
-                   DOLW,trialNC,coObj.fullBandFluxes) 
+           coObj.combinedDS = [BYBAND.combineBandsSgl(coObj.optBand, 
+                   DOLW,trialNC,coObj.fullBandFluxes)]
            coObj.costFuncComp(init=True)
            coObj.costFuncComp()
            print(len(coObj.totalCost))
