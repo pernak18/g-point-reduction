@@ -273,9 +273,6 @@ for i in range(coObj.iCombine, NITER+1):
            print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
     
     coObj.setupNextIter()
-    for bandNc in coObj.fullBandFluxes:
-        print ("in bandNc loop ",bandNc)
-
 
     temp = time.process_time()
     with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)
