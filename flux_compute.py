@@ -226,11 +226,15 @@ for i in range(coObj.iCombine, NITER+1):
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
+    
     print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
 
     if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
     #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 2.00:
        print ('will change here')
+       delta0 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
+       print (delta0)
+       print (type(delta0))
        bandObj = coObj.distBands
        bandKey='band0{}'.format(coObj.optBand+1)
        #sys.exit() 
@@ -264,13 +268,22 @@ for i in range(coObj.iCombine, NITER+1):
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
            coObj.combinedDS = [BYBAND.combineBandsSgl(coObj.optBand, 
                    DOLW,trialNC,coObj.fullBandFluxes)]
-           coObj.costFuncComp(init=True)
-           coObj.costFuncComp()
+           coObj.costFuncCompSgl(init=True)
+           coObj.costFuncCompSgl()
+           print ("len total cost", "dcost")
            print(len(coObj.totalCost))
            print(coObj.dCost[coObj.iOpt])
 
-           if DIAGNOSTICS: coObj.costDiagnostics()
+           if DIAGNOSTICS: coObj.costDiagnostics(sglFlag=True)
+           print ("delta cost")
            print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
+           #delta.append(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
+           if(pmFlag == 'plus'):
+               delta1 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
+           if(pmFlag == 'minus'):
+               delta2 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
+               print (delta0,delta1,delta2)
+               sys.exit()
     
     coObj.setupNextIter()
 
