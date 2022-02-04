@@ -1353,84 +1353,41 @@ class gCombine_Cost:
         lblDS.close()
     # end costFuncComp
 
-    def costFuncCompSgl(self, init=False):
+    def costFuncCompSgl(self, inDS):
         """
         Calculate flexible cost function where RRTMGP-LBLRTM RMS error for
         any number of allowed parameters (usually just flux or HR) over many
         levels is computed.
 
         Input
-            testDS -- xarray Dataset with RRTMGP fluxes
-
-        Keywords
-            init -- boolean, evalulate the cost function for the initial, 
-                full g-point k-distribution
+            inDS -- xarray dataset, RRTMGP fluxes of a single trial
         """
 
-        from itertools import repeat
-
         #print('Calculating cost for each trial')
-
-        if init:
-            with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
-        else:
-            allDS = list(self.combinedDS)
-        # endif init
 
         # normalize to get HR an fluxes on same scale
         # so each cost component has its own scale to 100
         scale = {}
         for comp, weight in zip(self.compNameCF, self.costWeights):
-            scale[comp] = 1 if init else weight * 100 / self.cost0[comp][0]
+            scale[comp] = weight * 100 / self.cost0[comp][0]
 
         lblDS = xa.open_dataset(self.lblNC)
         lblDS.load()
 
+        # trial = g-point combination
+        costDict = costCalc(lblDS, inDS, self.doLW, 
+            self.compNameCF, self.pLevCF, self.costComp0, scale, False)
+
+        self.totalCost[self.iOpt] = costDict['totalCost']
+        self.dCost[self.iOpt] = costDict['dCost']
         for comp in self.compNameCF:
-            # locally, we'll average over profiles AND pLevCF, but 
-            # the object will break down by pLevCF for diagnostics
-            self.costComps[comp] = []
-            self.dCostComps[comp] = []
+            self.costComps[comp][self.iOpt] = costDict['costComps'][comp]
+            self.dCostComps[comp][self.iOpt] = costDict['dCostComps'][comp]
         # end comp loop
-
-        if init:
-            # initial cost calculation; used for scaling -- 
-            # how did cost change relative to original 256 g-point cost
-            costDict = costCalc(
-                lblDS, allDS[0], self.doLW, self.compNameCF, 
-                self.pLevCF, self.costComp0, scale, True)
-
-            self.costComps = dict(costDict['costComps'])
-            self.dCostComps = dict(costDict['dCostComps'])
-
-            # if we have an empty dictionary for the initial cost 
-            # components, assign to it what should be the cost from the 
-            # full k-distribution (for which 
-            # there should only be 1 element in the list)
-            for iComp, comp in enumerate(self.compNameCF):
-                self.cost0[comp].append(costDict['allComps'][iComp])
-                self.costComp0[comp] = self.costComps[comp]
-            # end component loop
-        else:
-            # trial = g-point combination
-            # do single trial calculation and save 
-            for testDS in allDS: 
-                allCostDict = costCalc(lblDS, testDS, self.doLW, 
-                self.compNameCF, self.pLevCF, self.costComp0, scale, False)
-
-
-            allCostDict = [allCostDict]
-            for iDict, costDict in enumerate(allCostDict):
-                self.totalCost.append(costDict['totalCost'])
-                self.dCost.append(costDict['dCost'])
-                for comp in self.compNameCF:
-                    self.costComps[comp].append(costDict['costComps'][comp])
-                    self.dCostComps[comp].append(costDict['dCostComps'][comp])
-                # end comp loop
-        # endif init
 
         lblDS.close()
     # end costFuncCompSgl
+
     def findOptimal(self):
         """
         Determine which g-point combination for a given iteration in a band
@@ -1516,10 +1473,7 @@ class gCombine_Cost:
             outDS['cost0_{}'.format(comp)] = xa.DataArray(
                 self.costComp0[comp] * scale, dims=dims)
 
-            if sglFlag:
-                contrib = self.costComps[comp][0]* scale
-            else: 
-                contrib = self.costComps[comp][self.iOpt] * scale
+            contrib = self.costComps[comp][self.iOpt] * scale
 
             outDS['cost_{}'.format(comp)] = xa.DataArray(contrib, dims=dims)
 
@@ -1537,12 +1491,8 @@ class gCombine_Cost:
         # end comp loop
         print('\t{} = {}'.format(', '.join(outComp), ', '.join(outContrib)))
 
-        if sglFlag:
-            outDS['trial_total_cost'] = \
-                xa.DataArray(self.totalCost)
-        else:
-            outDS['trial_total_cost'] = \
-                xa.DataArray(self.totalCost, dims=('trial'))
+        outDS['trial_total_cost'] = \
+            xa.DataArray(self.totalCost, dims=('trial'))
 
         outNC = '{}/cost_components_iter{:03d}.nc'.format(
             diagDir, self.iCombine)

@@ -226,7 +226,7 @@ for i in range(coObj.iCombine, NITER+1):
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
-    
+    import copy
     print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
 
     if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
@@ -256,6 +256,7 @@ for i in range(coObj.iCombine, NITER+1):
 
        parr =['plus','minus']
        for pmFlag in parr:
+           coCopy = copy.deepcopy(coObj)
            print ("  ")
            print (pmFlag)
            newObj.gPointCombineSglPair(pmFlag,gCombine)
@@ -266,22 +267,22 @@ for i in range(coObj.iCombine, NITER+1):
            BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
-           coObj.combinedDS = [BYBAND.combineBandsSgl(coObj.optBand, 
-                   DOLW,trialNC,coObj.fullBandFluxes)]
-           coObj.costFuncCompSgl(init=True)
-           coObj.costFuncCompSgl()
+           coCopy.combinedDS[coObj.iOpt] = BYBAND.combineBandsSgl( 
+                   coObj.optBand, DOLW,trialNC,coObj.fullBandFluxes)
+           coCopy.costFuncCompSgl(coCopy.combinedDS[coObj.iOpt])
+           coCopy.findOptimal()
+        
            print ("len total cost", "dcost")
-           print(len(coObj.totalCost))
-           print(coObj.dCost[coObj.iOpt])
-
-           if DIAGNOSTICS: coObj.costDiagnostics(sglFlag=True)
+           print(len(coCopy.totalCost))
+           print(coCopy.dCost[coObj.iOpt])
+           if DIAGNOSTICS: coCopy.costDiagnostics()
            print ("delta cost")
-           print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
+           print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)
            #delta.append(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
            if(pmFlag == 'plus'):
-               delta1 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
+               delta1 = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
            if(pmFlag == 'minus'):
-               delta2 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
+               delta2 = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
                print (delta0,delta1,delta2)
                sys.exit()
     
