@@ -158,6 +158,10 @@ CFWGT = [0.6, 0.04, 0.12, 0.12,
         0.005, 0.005, 0.005,
         0.005]
 """
+
+# Modified g-point weighting used when cost function starts to increase
+xWeight = 0.1
+
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
 
@@ -186,7 +190,7 @@ else:
 
 # number of iterations for the optimization
 coSave = ' '
-NITER = 4
+NITER = 140
 print (coObj.iCombine)
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
@@ -229,14 +233,18 @@ for i in range(coObj.iCombine, NITER+1):
     import copy
     print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
 
+# Start of special g-point combination branch
+    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.0:
     if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
-    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 2.00:
        print ('will change here')
        delta0 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
        print (delta0)
        print (type(delta0))
        bandObj = coObj.distBands
-       bandKey='band0{}'.format(coObj.optBand+1)
+       if (coObj.optBand+1) < 10:
+           bandKey='band0{}'.format(coObj.optBand+1)
+       else:
+           bandKey='band{}'.format(coObj.optBand+1)
        #sys.exit() 
        newObj = BYBAND.gCombine_kDist(bandObj[bandKey].kInNC, coObj.optBand, DOLW,
             bandObj[bandKey].iCombine, fullBandKDir=BANDSPLITDIR,
@@ -259,7 +267,7 @@ for i in range(coObj.iCombine, NITER+1):
            coCopy = copy.deepcopy(coObj)
            print ("  ")
            print (pmFlag)
-           newObj.gPointCombineSglPair(pmFlag,gCombine)
+           newObj.gPointCombineSglPair(pmFlag,gCombine,xWeight)
            newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
            fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
            print (fluxFile)
@@ -278,13 +286,45 @@ for i in range(coObj.iCombine, NITER+1):
            if DIAGNOSTICS: coCopy.costDiagnostics()
            print ("delta cost")
            print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)
-           #delta.append(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
            if(pmFlag == 'plus'):
-               delta1 = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
+               deltaPlus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
            if(pmFlag == 'minus'):
-               delta2 = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
-               print (delta0,delta1,delta2)
-               sys.exit()
+               deltaMinus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
+
+# Fit cost of three g-point options to a parabola and find minimum weight
+       print (delta0,deltaPlus,deltaMinus)
+       xArr = [-xWeight,0.,xWeight]
+       yArr = [deltaMinus,delta0,deltaPlus]
+       coeff = np.polyfit(xArr,yArr,2)
+       xWeightNew = -coeff[1]/(2.*coeff[0])
+       print (xWeightNew)
+
+# Define newest g-point combination
+       coCopy = copy.deepcopy(coObj)
+       pmFlag = 'mod'
+       print ("  ")
+       print (pmFlag)
+       newObj.gPointCombineSglPair(pmFlag,gCombine,xWeightNew)
+       newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
+       fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
+       print (fluxFile)
+       print (newCoefFile)
+       BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
+
+       trialNC = '{}/{}'.format(fluxDir,fluxFile)
+       coCopy.combinedDS[coObj.iOpt] = BYBAND.combineBandsSgl( 
+               coObj.optBand, DOLW,trialNC,coObj.fullBandFluxes)
+       coCopy.costFuncCompSgl(coCopy.combinedDS[coObj.iOpt])
+       coCopy.findOptimal()
+    
+       print ("len total cost", "dcost")
+       print(len(coCopy.totalCost))
+       print(coCopy.dCost[coObj.iOpt])
+       if DIAGNOSTICS: coCopy.costDiagnostics()
+       print ("delta cost")
+       print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)
+       coObj = copy.deepcopy(coCopy)
+# End of spoecial g-point combination branch
     
     coObj.setupNextIter()
 

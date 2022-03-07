@@ -901,7 +901,7 @@ class gCombine_kDist:
             # end combination loop
         # endwith kDS
     # end gPointCombine()
-    def gPointCombineSglPair(self,pmFlag,gCombine):
+    def gPointCombineSglPair(self,pmFlag,gCombine,xWeight):
         """
         Combine g-points in a given band with adjacent g-point and
         store into a netCDF for further processing
@@ -940,8 +940,7 @@ class gCombine_kDist:
                 # band and iteration in given band
                 outDS.attrs['g_combine'] = '{}+{}'.format(g1+1, g2+1)
 
-                x0 = 0.500
-                if pmFlag == 'plus' :
+                if pmFlag == 'plus' or pmFlag == 'mod':
                     nscale = 1
                 else:
                     nscale=-1
@@ -958,7 +957,7 @@ class gCombine_kDist:
                             # replace g1' slice with weighted average of
                             # g1 and g2;
                             # dimensions get swapped for some reason
-                            delta = x0*nscale
+                            delta = xWeight*nscale
                             kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
                                 (kg1*w1*(1+delta) + kg2*w2*(1-delta)) / (w1 + w2), ncDat)
