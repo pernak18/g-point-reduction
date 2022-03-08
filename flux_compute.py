@@ -324,6 +324,7 @@ for i in range(coObj.iCombine, NITER+1):
        print ("delta cost")
        print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)
        coObj = copy.deepcopy(coCopy)
+       del coCopy
 # End of spoecial g-point combination branch
     
     coObj.setupNextIter()
