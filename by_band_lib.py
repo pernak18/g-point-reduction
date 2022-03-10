@@ -44,8 +44,8 @@ CFLEVS['band_flux_net'] = [0, 26, 42]
 CFWGT = [0.5, 0.5]
 
 # THIS NEEDS TO BE ADJUSTED FOR NERSC! cutting the total nCores in half
-NCORES = 24 #multiprocessing.cpu_count() // 2
-CHUNK = 10
+NCORES = multiprocessing.cpu_count()
+CHUNK = int(NCORES)
 
 def pathCheck(path, mkdir=False):
     """
@@ -101,15 +101,20 @@ def fluxCompute(inK, profiles, exe, fluxDir, outFile):
     os.rename(inRRTMGP, outFile)
     #print('Wrote {}'.format(outFile))
 
+    return outFile
+
+    """
     with xa.open_dataset(outFile) as outDS:
         outDS.load()
         os.chdir(cwd)
 
         return outDS
     # endwith
+    """
 # end fluxCompute()
 
-def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
+def combineBands(iBand, fullNC, trialNC, lw, outNC='trial_band_combined.nc', 
+                 finalDS=False):
     """
     Combine a given trial fluxes dataset in a given band with the full-band 
     fluxes from the rest of the bands
@@ -135,6 +140,9 @@ def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
         outDS -- xarray Dataset, fluxes for all bands
     """
 
+    fullDS = [xa.open_dataset(fNC) for fNC in fullNC]
+    trialDS = xa.open_dataset(trialNC)
+    
     nForce = fullDS[0].sizes['record']
     bandVars = ['flux_up', 'flux_dn', 'flux_net', 'heating_rate', 
                 'emis_sfc', 'band_lims_wvn']
@@ -221,10 +229,18 @@ def combineBands(iBand, fullDS, trialDS, lw, finalDS=False):
         outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
     # end fluxVar loop
 
-    return outDS
+    for fDS in fullDS: fDS.close()
+    trialDS.close()
+
+    outDS.heating_rate.attrs['units'] = 'K/s'
+    outDS.band_heating_rate.attrs['units'] = 'K/s'
+
+    outDS.to_netcdf(outNC)
+
+    return outNC
 # end combineBands()
 
-def combineBandsSgl(iBand, lw, trialNC,fullBandFluxes,finalDS=False):
+def combineBandsSgl(iBand, lw, trialNC, fullBandFluxes, finalDS=False):
     """
     Combine a given trial fluxes dataset in a given band with the full-band 
     fluxes from the rest of the bands
@@ -355,7 +371,7 @@ def combineBandsSgl(iBand, lw, trialNC,fullBandFluxes,finalDS=False):
     return outDS
 # end combineBandsSgl()
 
-def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
+def costCalc(lblNC, testNC, doLW, compNameCF, pLevCF, costComp0, scale, init):
     """
     Calculate cost of test dataset with respect to reference dataset 
     at a given number of pressure levels and for a given set of 
@@ -398,6 +414,8 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
         None
     """
 
+    lblDS = xa.open_dataset(lblNC)
+    testDS = xa.open_dataset(testNC)
     allComps = []
 
     # add diffuse to SW dataset
@@ -516,6 +534,9 @@ def costCalc(lblDS, testDS, doLW, compNameCF, pLevCF, costComp0, scale, init):
     allComps = np.array(allComps)
     totalCost = allComps.sum()
     dCost = totalCost - 100
+
+    lblDS.close()
+    testDS.close()
 
     return {'allComps': allComps, 'totalCost': totalCost, 'dCost': dCost, 
             'costComps': costComps, 'dCostComps': dCostComps}
@@ -1141,11 +1162,11 @@ class gCombine_Cost:
 
         # flux datasets with single g-point combinations, 
         # these are not combined with full-band fluxes
-        self.trialDS = []
+        self.trialNC = []
 
         # list of xarray datasets that combines g-point combination 
         # arrays (self.iBand) with full-band arrays (!= self.iBand)
-        self.combinedDS = []
+        self.combinedNC = []
 
         self.iOpt = None
         self.dCost = []
@@ -1220,11 +1241,11 @@ class gCombine_Cost:
 
         # using processes (slower, separate memory) instead of threads
         #print('Calculating fluxes')
-        with multiprocessing.Pool(NCORES) as pool:
+        with multiprocessing.Pool(processes=NCORES, maxtasksperchild=1) as pool:
             result = pool.starmap_async(fluxCompute, argsMap, chunksize=CHUNK)
             # is order preserved?
             # https://stackoverflow.com/a/57725895 => yes
-            self.trialDS = result.get()
+            self.trialNC = result.get()
         # endwith
     # end fluxComputePool()
 
@@ -1237,11 +1258,14 @@ class gCombine_Cost:
         rather than using the RRTMGP calculations
         """
 
+        import pathlib as PL
+
         # corresponding band numbers (zero-offset)
         bandIDs = [inputs['bandID'] for inputs in self.fluxInputsAll]
 
         # open all of the full-band netCDFs as xarray datasets
         # will be combined accordingly with single-band g-point combinations
+        """
         fullDS = []
         for bandNC in self.fullBandFluxes:
             with xa.open_dataset(bandNC) as bandDS:
@@ -1249,22 +1273,30 @@ class gCombine_Cost:
                 fullDS.append(bandDS)
             # end with
         # end bandNC loop
+        """
 
         #print('Combining trial fluxes with full-band fluxes')
 
+        workdirCombine = PL.Path('./combinedBands_trials')
+        if not workdirCombine.is_dir(): os.makedirs(workdirCombine)
+
         # trial = g-point combination
         argsMap = []
-        for iBand, trial in zip(bandIDs, self.trialDS):
-            argsMap.append((iBand, fullDS, trial, self.doLW, False))
+        iTrials = range(1, len(self.trialNC)+1)
+        for iBand, trial, iTrial in zip(bandIDs, self.trialNC, iTrials):
+            combNC = '{}/combinedBandsNC_trial{:03d}.nc'.format(
+                workdirCombine, iTrial)
+            argsMap.append(
+                (iBand, self.fullBandFluxes, trial, self.doLW, combNC, False))
+        # end iBand/trial/iTrial loop
 
-        with multiprocessing.Pool(NCORES) as pool:
+        with multiprocessing.Pool(processes=NCORES, maxtasksperchild=1) as pool:
             result = pool.starmap_async(combineBands, argsMap, chunksize=CHUNK)
             # is order preserved?
             # https://stackoverflow.com/a/57725895 => yes
-            self.combinedDS = result.get()
+            self.combinedNC = result.get()
         # endwith
     # end fluxCombine()
-
 
     def costFuncComp(self, init=False):
         """
@@ -1284,11 +1316,13 @@ class gCombine_Cost:
 
         #print('Calculating cost for each trial')
 
+        """
         if init:
             with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
         else:
-            allDS = list(self.combinedDS)
+            allDS = [xa.open_dataset(combNC) for combNC in self.combinedNC]
         # endif init
+        """
 
         # normalize to get HR an fluxes on same scale
         # so each cost component has its own scale to 100
@@ -1296,8 +1330,8 @@ class gCombine_Cost:
         for comp, weight in zip(self.compNameCF, self.costWeights):
             scale[comp] = 1 if init else weight * 100 / self.cost0[comp][0]
 
-        lblDS = xa.open_dataset(self.lblNC)
-        lblDS.load()
+        #lblDS = xa.open_dataset(self.lblNC)
+        #lblDS.load()
 
         for comp in self.compNameCF:
             # locally, we'll average over profiles AND pLevCF, but 
@@ -1310,7 +1344,7 @@ class gCombine_Cost:
             # initial cost calculation; used for scaling -- 
             # how did cost change relative to original 256 g-point cost
             costDict = costCalc(
-                lblDS, allDS[0], self.doLW, self.compNameCF, 
+                self.lblNC, self.rrtmgpNC, self.doLW, self.compNameCF, 
                 self.pLevCF, self.costComp0, scale, True)
 
             self.costComps = dict(costDict['costComps'])
@@ -1328,12 +1362,12 @@ class gCombine_Cost:
             # trial = g-point combination
             # set up arguments for parallelization
             argsMap = []
-            for testDS in allDS: argsMap.append(
-                (lblDS, testDS, self.doLW, self.compNameCF, 
+            for testNC in self.combinedNC: argsMap.append(
+                (self.lblNC, testNC, self.doLW, self.compNameCF, 
                  self.pLevCF, self.costComp0, scale, False))
 
             # parallize cost calculation for trials and extract output
-            with multiprocessing.Pool(NCORES) as pool:
+            with multiprocessing.Pool(processes=NCORES, maxtasksperchild=1) as pool:
                 result = pool.starmap_async(costCalc, argsMap, chunksize=CHUNK)
                 # is order preserved?
                 # https://stackoverflow.com/a/57725895 => yes
@@ -1349,7 +1383,7 @@ class gCombine_Cost:
                 # end comp loop
         # endif init
 
-        lblDS.close()
+        #lblDS.close()
     # end costFuncComp
 
     def costFuncCompSgl(self, inDS):
@@ -1407,7 +1441,7 @@ class gCombine_Cost:
             # remove trial from consideration if no more g-point combining 
             # is possible
             self.fluxInputsAll.pop(self.iOpt)
-            self.combinedDS.pop(self.iOpt)
+            self.combinedNC.pop(self.iOpt)
             self.totalCost.pop(self.iOpt)
             self.dCost.pop(self.iOpt)
             for comp in self.compNameCF:
@@ -1539,7 +1573,9 @@ class gCombine_Cost:
         self.fullBandFluxes[int(self.optBand)] = \
             self.fluxInputsAll[self.iOpt]['fluxNC']
         self.fluxInputsAll = []
-        self.combinedDS = []
+
+        for combNC in self.combinedNC: os.remove(combNC)
+        self.combinedNC = []
         self.dCost = []
         self.totalCost = []
         self.optBand = None
@@ -1750,12 +1786,13 @@ class gCombine_Cost:
         distribution across all bands
         """
 
+        """
         fullDS = []
         for bandNC in self.fullBandFluxes:
             with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
-        finalDS = combineBands(0, fullDS, fullDS[0], self.doLW, finalDS=True)
-        finalDS.heating_rate.attrs['units'] = 'K/s'
-        finalDS.band_heating_rate.attrs['units'] = 'K/s'
+        finalDS = combineBands(
+            0, self.fullBandFluxes, self.fullBandFluxes[0], self.doLW, finalDS=True)
         finalDS.to_netcdf(fluxOutNC)
+        """
     # end calcOptFlux()

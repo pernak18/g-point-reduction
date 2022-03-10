@@ -16,3 +16,4 @@ workdir_*
 band_*_opt
 *.pickle
 run_rrtmgp
+combinedBands_trialsOA

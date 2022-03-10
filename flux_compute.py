@@ -2,7 +2,7 @@
 
 import os, sys, shutil, glob, pickle, copy, time
 
-os.chdir('/global/u2/k/kcadyper/g-point-reduction/')
+#os.chdir('/global/u2/k/kcadyper/g-point-reduction/')
 
 # "standard" install
 import numpy as np
@@ -14,6 +14,8 @@ import pathlib as PL
 # directory in which libraries installed with conda are saved
 PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
     'lib/python3.8/site-packages'
+# PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
+#     'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
 PATHS = ['common', PIPPATH]
 for path in PATHS: sys.path.append(path)
 
@@ -190,7 +192,7 @@ else:
 
 # number of iterations for the optimization
 coSave = ' '
-NITER = 140
+NITER = 2
 print (coObj.iCombine)
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
@@ -204,25 +206,24 @@ for i in range(coObj.iCombine, NITER+1):
     print('Iteration {}'.format(i))
     temp = time.process_time()
     coObj.kMap()
-#     print('kMap: {:.4f}'.format(time.process_time()-temp))
+    # print('kMap: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
 
     temp = time.process_time()
     coObj.fluxComputePool()
-#     print('Flux Compute: {:.4f}'.format(time.process_time()-temp))
+    # print('Flux Compute: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
 
     temp = time.process_time()
     coObj.fluxCombine()
-#     print('Flux Combine: {:.4f}'.format(time.process_time()-temp))
+    # print('Flux Combine: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
 
     temp = time.process_time()
     coObj.costFuncComp(init=True)
     coObj.costFuncComp()
-#     print('Cost function computation: {:.4f}'.format(time.process_time()-temp))
+    # print('Cost function computation: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
 
     temp = time.process_time()
     coObj.findOptimal()
-#     print('findOptimal: {:.4f}'.format(time.process_time()-temp))
-
+    # print('findOptimal: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
 
     print(len(coObj.totalCost))
     print(coObj.dCost[coObj.iOpt])
@@ -230,6 +231,21 @@ for i in range(coObj.iCombine, NITER+1):
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
+    coObj.setupNextIter()
+
+    temp = time.process_time()
+    with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)
+#     print('Pickle: {:.4f}'.format(time.process_time()-temp))
+
+#     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
+    # coObj.calcOptFlux(
+    #     fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
+    # combine flux netCDFs after optimized solution for iteration is found
+    BYBAND.combineBands(0, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
+                        coObj.doLW, 
+                        outNC='optimized_fluxes_iter{:03d}.nc'.format(i))
+    
+    continue
     import copy
     print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
 
@@ -334,8 +350,6 @@ for i in range(coObj.iCombine, NITER+1):
 #     print('Pickle: {:.4f}'.format(time.process_time()-temp))
 
 #     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
-    coObj.calcOptFlux(
-        fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
 # end iteration loop
 
 t1 = time.process_time()
@@ -344,7 +358,10 @@ KOUTNC = 'rrtmgp-data-{}-g-red.nc'.format(DOMAIN)
 ncFiles = [coObj.distBands[key].kInNC for key in coObj.distBands.keys()]
 # kDistOpt(KFULLNC, kOutNC=KOUTNC)
 coObj.kDistOpt(KFULLNC, kOutNC=KOUTNC)
-coObj.calcOptFlux()
+
+# combine flux netCDFs after optimized solutions over all trials are found
+BYBAND.combineBands(0, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
+                    coObj.doLW, finalDS=True, outNC='optimized_fluxes.nc')
 # print('New k-file {:.4f}'.format(time.process_time()-t1))
 
 print('Optimization complete')
