@@ -14,8 +14,8 @@ import pathlib as PL
 # directory in which libraries installed with conda are saved
 PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
     'lib/python3.8/site-packages'
-# PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-#     'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
+PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
+    'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
 PATHS = ['common', PIPPATH]
 for path in PATHS: sys.path.append(path)
 
@@ -231,20 +231,19 @@ for i in range(coObj.iCombine, NITER+1):
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
-    coObj.setupNextIter()
-
-    temp = time.process_time()
-    with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)
 #     print('Pickle: {:.4f}'.format(time.process_time()-temp))
 
 #     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
     # coObj.calcOptFlux(
     #     fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
     # combine flux netCDFs after optimized solution for iteration is found
-    BYBAND.combineBands(0, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
+    BYBAND.combineBands(coObj.optBand, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
                         coObj.doLW, 
                         outNC='optimized_fluxes_iter{:03d}.nc'.format(i))
-    
+
+    with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)
+    coObj.setupNextIter()
+
     continue
     import copy
     print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
