@@ -2,7 +2,7 @@
 
 import os, sys, shutil, glob, pickle, copy, time
 
-#os.chdir('/global/u2/k/kcadyper/g-point-reduction/')
+os.chdir('/global/u2/k/kcadyper/g-point-reduction/')
 
 # "standard" install
 import numpy as np
@@ -14,8 +14,8 @@ import pathlib as PL
 # directory in which libraries installed with conda are saved
 PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
     'lib/python3.8/site-packages'
-PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-    'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
+#PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
+#    'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
 PATHS = ['common', PIPPATH]
 for path in PATHS: sys.path.append(path)
 
@@ -162,10 +162,10 @@ CFWGT = [0.6, 0.04, 0.12, 0.12,
 """
 
 # Modified g-point weighting used when cost function starts to increase
-xWeight = 0.1
 
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
+print (fullBandFluxes)
 
 #with open('{}_k-dist.pickle'.format(DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
 with open('{}/{}_k-dist.pickle'.format(os.getcwd(), DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
@@ -192,7 +192,7 @@ else:
 
 # number of iterations for the optimization
 coSave = ' '
-NITER = 2
+NITER = 5
 print (coObj.iCombine)
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
@@ -231,20 +231,6 @@ for i in range(coObj.iCombine, NITER+1):
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
-#     print('Pickle: {:.4f}'.format(time.process_time()-temp))
-
-#     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
-    # coObj.calcOptFlux(
-    #     fluxOutNC='optimized_fluxes_iter{:03d}.nc'.format(i))
-    # combine flux netCDFs after optimized solution for iteration is found
-    BYBAND.combineBands(coObj.optBand, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
-                        coObj.doLW, 
-                        outNC='optimized_fluxes_iter{:03d}.nc'.format(i))
-
-    with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)
-    coObj.setupNextIter()
-
-    continue
     import copy
     print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
 
@@ -252,6 +238,7 @@ for i in range(coObj.iCombine, NITER+1):
     #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.0:
     if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
        print ('will change here')
+       xWeight = 0.1
        delta0 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
        print (delta0)
        print (type(delta0))
@@ -290,8 +277,9 @@ for i in range(coObj.iCombine, NITER+1):
            BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
+           print (fullBandFluxes)
            coCopy.combinedDS[coObj.iOpt] = BYBAND.combineBandsSgl( 
-                   coObj.optBand, DOLW,trialNC,coObj.fullBandFluxes)
+                   coObj.optBand, fullBandFluxes,trialNC,DOLW)
            coCopy.costFuncCompSgl(coCopy.combinedDS[coObj.iOpt])
            coCopy.findOptimal()
         
@@ -328,7 +316,7 @@ for i in range(coObj.iCombine, NITER+1):
 
        trialNC = '{}/{}'.format(fluxDir,fluxFile)
        coCopy.combinedDS[coObj.iOpt] = BYBAND.combineBandsSgl( 
-               coObj.optBand, DOLW,trialNC,coObj.fullBandFluxes)
+               coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW,)
        coCopy.costFuncCompSgl(coCopy.combinedDS[coObj.iOpt])
        coCopy.findOptimal()
     

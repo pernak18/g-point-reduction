@@ -240,7 +240,7 @@ def combineBands(iBand, fullNC, trialNC, lw, outNC='trial_band_combined.nc',
     return outNC
 # end combineBands()
 
-def combineBandsSgl(iBand, lw, trialNC, fullBandFluxes, finalDS=False):
+def combineBandsSgl(iBand,fullNC,trialNC,lw,outNC='trial_band_combined.nc', finalDS=False):
     """
     Combine a given trial fluxes dataset in a given band with the full-band 
     fluxes from the rest of the bands
@@ -285,7 +285,7 @@ def combineBandsSgl(iBand, lw, trialNC, fullBandFluxes, finalDS=False):
             trialDS.load()
 
     fullDS = []
-    for bandNC in fullBandFluxes:
+    for bandNC in fullNC:
         with xa.open_dataset(bandNC) as bandDS:
             bandDS.load()
             fullDS.append(bandDS)
@@ -368,7 +368,15 @@ def combineBandsSgl(iBand, lw, trialNC, fullBandFluxes, finalDS=False):
         outDS[fluxVar] = xa.DataArray(broadband, dims=dimsBB)
     # end fluxVar loop
 
-    return outDS
+    for fDS in fullDS: fDS.close()
+    trialDS.close()
+
+    outDS.heating_rate.attrs['units'] = 'K/s'
+    outDS.band_heating_rate.attrs['units'] = 'K/s'
+
+    outDS.to_netcdf(outNC)
+
+    return outNC
 # end combineBandsSgl()
 
 def costCalc(lblNC, testNC, doLW, compNameCF, pLevCF, costComp0, scale, init):
@@ -1386,14 +1394,14 @@ class gCombine_Cost:
         #lblDS.close()
     # end costFuncComp
 
-    def costFuncCompSgl(self, inDS):
+    def costFuncCompSgl(self, inNC):
         """
         Calculate flexible cost function where RRTMGP-LBLRTM RMS error for
         any number of allowed parameters (usually just flux or HR) over many
         levels is computed.
 
         Input
-            inDS -- xarray dataset, RRTMGP fluxes of a single trial
+            inNC-- NC file:  RRTMGP fluxes of a single trial
         """
 
         #print('Calculating cost for each trial')
@@ -1404,11 +1412,11 @@ class gCombine_Cost:
         for comp, weight in zip(self.compNameCF, self.costWeights):
             scale[comp] = weight * 100 / self.cost0[comp][0]
 
-        lblDS = xa.open_dataset(self.lblNC)
-        lblDS.load()
+        #lblDS = xa.open_dataset(self.lblNC)
+        #lblDS.load()
 
         # trial = g-point combination
-        costDict = costCalc(lblDS, inDS, self.doLW, 
+        costDict = costCalc(self.lblNC, inNC, self.doLW, 
             self.compNameCF, self.pLevCF, self.costComp0, scale, False)
 
         self.totalCost[self.iOpt] = costDict['totalCost']
@@ -1418,7 +1426,7 @@ class gCombine_Cost:
             self.dCostComps[comp][self.iOpt] = costDict['dCostComps'][comp]
         # end comp loop
 
-        lblDS.close()
+        #lblDS.close()
     # end costFuncCompSgl
 
     def findOptimal(self):
