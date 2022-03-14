@@ -101,6 +101,8 @@ def fluxCompute(inK, profiles, exe, fluxDir, outFile):
     os.rename(inRRTMGP, outFile)
     #print('Wrote {}'.format(outFile))
 
+    os.chdir(cwd)
+
     return outFile
 
     """

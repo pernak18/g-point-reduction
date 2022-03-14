@@ -14,8 +14,8 @@ import pathlib as PL
 # directory in which libraries installed with conda are saved
 PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
     'lib/python3.8/site-packages'
-#PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-#    'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
+# PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
+#     'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
 PATHS = ['common', PIPPATH]
 for path in PATHS: sys.path.append(path)
 
@@ -278,9 +278,9 @@ for i in range(coObj.iCombine, NITER+1):
 
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
            print (fullBandFluxes)
-           coCopy.combinedDS[coObj.iOpt] = BYBAND.combineBandsSgl( 
+           coCopy.combinedNC[coObj.iOpt] = BYBAND.combineBandsSgl( 
                    coObj.optBand, fullBandFluxes,trialNC,DOLW)
-           coCopy.costFuncCompSgl(coCopy.combinedDS[coObj.iOpt])
+           coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
            coCopy.findOptimal()
         
            print ("len total cost", "dcost")
@@ -315,9 +315,9 @@ for i in range(coObj.iCombine, NITER+1):
        BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
        trialNC = '{}/{}'.format(fluxDir,fluxFile)
-       coCopy.combinedDS[coObj.iOpt] = BYBAND.combineBandsSgl( 
+       coCopy.combinedNC[coObj.iOpt] = BYBAND.combineBandsSgl( 
                coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW,)
-       coCopy.costFuncCompSgl(coCopy.combinedDS[coObj.iOpt])
+       coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
        coCopy.findOptimal()
     
        print ("len total cost", "dcost")
