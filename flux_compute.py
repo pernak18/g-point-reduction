@@ -165,7 +165,6 @@ CFWGT = [0.6, 0.04, 0.12, 0.12,
 
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
-print (fullBandFluxes)
 
 #with open('{}_k-dist.pickle'.format(DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
 with open('{}/{}_k-dist.pickle'.format(os.getcwd(), DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
@@ -175,7 +174,7 @@ CFDIR = 'salami'
 CFDIR = 'direct-down'
 CFDIR = 'xsecs_test_eli'
 
-RESTORE = False
+RESTORE = True
 pickleCost = '{}_cost-optimize.pickle'.format(DOMAIN)
 
 if RESTORE:
@@ -192,8 +191,7 @@ else:
 
 # number of iterations for the optimization
 coSave = ' '
-NITER = 5
-print (coObj.iCombine)
+NITER = 140
 DIAGNOSTICS = True
 for i in range(coObj.iCombine, NITER+1):
     t1 = time.process_time()
@@ -225,31 +223,27 @@ for i in range(coObj.iCombine, NITER+1):
     coObj.findOptimal()
     # print('findOptimal: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
 
-    print(len(coObj.totalCost))
-    print(coObj.dCost[coObj.iOpt])
 
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
     import copy
-    print(coObj.dCost[coObj.iOpt]-coObj.deltaCost0)
 
 # Start of special g-point combination branch
-    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.0:
-    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
+    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.0:
+    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
        print ('will change here')
        xWeight = 0.1
        delta0 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
-       print (delta0)
-       print (type(delta0))
        bandObj = coObj.distBands
        if (coObj.optBand+1) < 10:
            bandKey='band0{}'.format(coObj.optBand+1)
        else:
            bandKey='band{}'.format(coObj.optBand+1)
        #sys.exit() 
+        
        newObj = BYBAND.gCombine_kDist(bandObj[bandKey].kInNC, coObj.optBand, DOLW,
-            bandObj[bandKey].iCombine, fullBandKDir=BANDSPLITDIR,
+            i, fullBandKDir=BANDSPLITDIR,
             fullBandFluxDir=FULLBANDFLUXDIR)
        curkFile = os.path.basename(coObj.optNC)
        ind = curkFile.find('_g')
@@ -257,7 +251,6 @@ for i in range(coObj.iCombine, NITER+1):
        g2 = int(curkFile[ind+5:ind+7])
        gCombine =[[g1-1,g2-1]]
 
-       print  ("   ")
        print (newObj.workDir)
        ind = curkFile.find('coeff')
        print (curkFile)
@@ -277,18 +270,12 @@ for i in range(coObj.iCombine, NITER+1):
            BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
-           print (fullBandFluxes)
            coCopy.combinedNC[coObj.iOpt] = BYBAND.combineBandsSgl( 
                    coObj.optBand, fullBandFluxes,trialNC,DOLW)
            coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
            coCopy.findOptimal()
         
-           print ("len total cost", "dcost")
-           print(len(coCopy.totalCost))
-           print(coCopy.dCost[coObj.iOpt])
            if DIAGNOSTICS: coCopy.costDiagnostics()
-           print ("delta cost")
-           print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)
            if(pmFlag == 'plus'):
                deltaPlus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
            if(pmFlag == 'minus'):
@@ -320,9 +307,6 @@ for i in range(coObj.iCombine, NITER+1):
        coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
        coCopy.findOptimal()
     
-       print ("len total cost", "dcost")
-       print(len(coCopy.totalCost))
-       print(coCopy.dCost[coObj.iOpt])
        if DIAGNOSTICS: coCopy.costDiagnostics()
        print ("delta cost")
        print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)

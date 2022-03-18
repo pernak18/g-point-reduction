@@ -947,6 +947,9 @@ class gCombine_kDist:
             # and associated weights for given band
             nNew = kDS.dims['gpt']-1
             wCombine = [weights[np.array(gc)] for gc in gCombine]
+            print ("in gPointCombineSglPair")
+            print ("self.iCombine")
+            print (self.iCombine)
 
             for gc, wc in zip(gCombine, wCombine):
                 g1, g2 = gc
