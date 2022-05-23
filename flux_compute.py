@@ -193,6 +193,7 @@ else:
 coSave = ' '
 NITER = 140
 DIAGNOSTICS = True
+print ("  ",file=open('new_weight_diag.txt','w'))
 for i in range(coObj.iCombine, NITER+1):
     t1 = time.process_time()
 
@@ -200,6 +201,8 @@ for i in range(coObj.iCombine, NITER+1):
     wgtInfo = ['{:.2f} ({})'.format(
         wgt, comp) for wgt, comp in zip(CFWGT, CFCOMPS)]
     wgtInfo = ' '.join(wgtInfo)
+    print  ("  ")
+    print  ("  ")
     print('Weights: {}'.format(wgtInfo))
     print('Iteration {}'.format(i))
     temp = time.process_time()
@@ -230,10 +233,10 @@ for i in range(coObj.iCombine, NITER+1):
     import copy
 
 # Start of special g-point combination branch
-    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.0:
+    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.1:
     #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
        print ('will change here')
-       xWeight = 0.1
+       xWeight = 0.05
        delta0 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
        bandObj = coObj.distBands
        if (coObj.optBand+1) < 10:
@@ -271,9 +274,9 @@ for i in range(coObj.iCombine, NITER+1):
 
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
            coCopy.combinedNC[coObj.iOpt] = BYBAND.combineBandsSgl( 
-                   coObj.optBand, fullBandFluxes,trialNC,DOLW)
+                   coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW)
            coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
-           coCopy.findOptimal()
+           #coCopy.findOptimal()
         
            if DIAGNOSTICS: coCopy.costDiagnostics()
            if(pmFlag == 'plus'):
@@ -281,12 +284,28 @@ for i in range(coObj.iCombine, NITER+1):
            if(pmFlag == 'minus'):
                deltaMinus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
 
-# Fit cost of three g-point options to a parabola and find minimum weight
-       print (delta0,deltaPlus,deltaMinus)
+# Fit change in cost of three g-point options to a parabola and find minimum weight if parabola is concave;
+#  if that weight is outside the (-0.1,0.1) range or the parabola is convex use the weight that leads to 
+# the smallest increase or largest decrease in the  cost function;
+
+       print ("  ")
+       print ("New weight calculation")
        xArr = [-xWeight,0.,xWeight]
        yArr = [deltaMinus,delta0,deltaPlus]
+       print (yArr)
+       ymin = min(yArr)
+       imin = yArr.index(ymin)
        coeff = np.polyfit(xArr,yArr,2)
-       xWeightNew = -coeff[1]/(2.*coeff[0])
+       print (coeff[0])
+       xMin = -coeff[1]/(2.*coeff[0])
+       if (coeff[0] >0.):
+           print ("concave parabola ",xMin)
+           if (xMin < -xWeight or xMin > xWeight):
+               xWeightNew = xArr[imin]
+           else:
+               xWeightNew = xMin
+       else:
+           xWeightNew = xArr[imin]
        print (xWeightNew)
 
 # Define newest g-point combination
@@ -297,15 +316,17 @@ for i in range(coObj.iCombine, NITER+1):
        newObj.gPointCombineSglPair(pmFlag,gCombine,xWeightNew)
        newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
        fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
-       print (fluxFile)
        print (newCoefFile)
+       print (newCoefFile,file=open('new_weight_diag.txt','a'))
+       print (coeff[0],xMin,yArr,xWeightNew,file=open('new_weight_diag.txt','a'))
+       print ("  ",file=open('new_weight_diag.txt','a'))
        BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
        trialNC = '{}/{}'.format(fluxDir,fluxFile)
        coCopy.combinedNC[coObj.iOpt] = BYBAND.combineBandsSgl( 
                coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW,)
        coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
-       coCopy.findOptimal()
+       #coCopy.findOptimal()
     
        if DIAGNOSTICS: coCopy.costDiagnostics()
        print ("delta cost")

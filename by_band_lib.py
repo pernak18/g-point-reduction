@@ -994,7 +994,7 @@ class gCombine_kDist:
                             delta = xWeight*nscale
                             kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
-                                (kg1*w1*(1+delta) + kg2*w2*(1-delta)) / (w1 + w2), ncDat)
+                                kg1*((w1/(w1+w2))+delta) + kg2*((w2/(w1+w2))-delta),ncDat)
                             ncDat = ncDat.transpose(*varDims)
                         else:
                             # replace g1' weight with integrated values at
