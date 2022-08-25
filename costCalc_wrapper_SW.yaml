@@ -1,42 +1,43 @@
 # COST FUNCTION DEFINITION (components, levels, weights)
+# Reference file (LBLRTM or CHARTS/LBL) path to 
+# RRTMGP-type netCDF flux file
+ref_path: charts-sw-flux-inputs-outputs-garandANDpreind.nc
 
-  parser.add_argument('--ref_path', '-r', type=str,
-    default='lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc',
-    help='Reference file (LBLRTM or CHARTS/LBL) path to ' + \
-      'RRTMGP-type netCDF flux file.')
-  parser.add_argument('--test_path', '-t', type=str, \
-    default='rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc',
-    help='Path to RRTMGP netCDF flux file for full k-distribution.')
-  parser.add_argument('--others', '-o', type=str, nargs='+',
-    default=['optimized_fluxes.nc', 'optimized_fluxes_iter001.nc'],
-    help='List of paths to additional test files that are ' + \
-      'similar to --test_path, but for additional configurations ' + \
-      '(optimal angle, g-point reduction, etc.). The total cost ' + \
-      'for these configurations are compared to the cost of ' + \
-      '--test_file')
-  parser.add_argument('--sw', '-sw', action='store_true', \
-    help='Do shortwave cost instead of default longwave.')
+# Path to RRTMGP netCDF flux file for full k-distribution
+test_path: rrtmgp-sw-flux-inputs-outputs-garandANDpreind.nc
 
-# Eli SW
-COMPS = ['flux_dif_net', 'flux_dir_dn', 'heating_rate',
-  'heating_rate_7', 'flux_net_forcing_5', 'flux_net_forcing_6',
-  'flux_net_forcing_7', 'flux_net_forcing_19']
+# List of paths to additional test files that are
+# similar to test_path, but for additional formulations
+# (optimal angle, g-point reduction, etc.). The total cost
+# for these configurations are compared to the cost of test_file
+# needs to be a list, even if theres only 1
+others: [optimized_SW_fluxes.nc, optimized_SW_fluxes_iter001.nc]
 
-# 1 level key must exist for each COMPS string
-# indices of pressure levels to use in cost calculation
-# 0: Surface, 26: Tropopause, 42: TOA
+# LW or SW (if False) comparisons
+do_lw: False
 
-# Eli SW
-LEVELS = {}
-LEVELS['flux_dif_net'] = [0, 26, 42]
-LEVELS['flux_dir_dn'] = range(42)
-LEVELS['heating_rate'] = range(42)
-LEVELS['heating_rate_7'] = range(42)
-LEVELS['flux_net_forcing_5'] = [0,42]
-LEVELS['flux_net_forcing_6'] = [0,42]
-LEVELS['flux_net_forcing_7'] = [0,42]
-LEVELS['flux_net_forcing_19'] = [0,42]
+# boundary definitions (e.g., Garand)
+boundaries: &bounds [sfc, tpause, toa]
+level_indices:
+  surface: 0
+  tropopause: 26
+  top: 42
 
-# 1 weight per COMPS string
-# Eli SW
-WEIGHTS = [0.1, 0.6, 0.05, 0.05, 0.02, 0.05, 0.11, 0.02]
+# COST FUNCTION DEFINITION (components, levels, weights)
+# names, levels, and weights should be 1-1-1 mapping
+# Eli SW cost function
+components: 
+  # id: [component name, [levels], weight]
+  # component names should correspond to array names 
+  # in the netCDF files (case sensitive!)
+  # levels are lists of pressure levels to use in cost calculation
+  # sfc: Surface, tpause: Tropopause, toa: top-of-atmosphere, 
+  # all: all levels (implicitly a list); 0-offset index otherwise
+  1:  [flux_dif_net, *bounds, 0.1]
+  2:  [flux_dir_dn, ['all'], 0.6]
+  3:  [heating_rate, ['all'], 0.05]
+  4:  [heating_rate_4xco2, ['all'], 0.05]
+  5:  [flux_net_forcing_pi_pd-no2, [sfc, toa], 0.02]
+  6:  [flux_net_forcing_4xch4, [sfc, toa], 0.05]
+  7:  [flux_net_forcing_4xco2, [sfc, toa], 0.11]
+  8:  [flux_net_forcing_no2xs, [sfc, toa], 0.02]
