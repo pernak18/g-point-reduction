@@ -33,12 +33,15 @@ class costCompare:
     self.config = str(inYAML)
     utils.file_check(self.config)
 
-    # populated by readYAML
+    # populated by readYAML()
     self.refNC, self.testNC, self.others, self.doLW = \
       None, None, None, None
+
+    # populated by costCalc()
     self.scale, self.cost0, self.totalCost, self.costComps = \
       {}, {}, {}, {}
     self.compNames, self.compLevs, self.compWeights = [], {}, {}
+    self.outComps = []
 
     # populated by aliases*()
     self.aliases = {}
@@ -87,7 +90,6 @@ class costCompare:
       self.aliases['names']['user'] += [
         '{}_forcing_{}'.format(field, name) for field in fieldsNC]
     # end record loop
-    # for code, user in zip(self.aliases['names']['code'], self.aliases['names']['user']): print('{:50s}{:50s}'.format(code, user))
   # end aliasesGarandLW()
 
   def readYAML(self):
@@ -116,6 +118,7 @@ class costCompare:
 
     for iComp, comp in config['components'].items():
       name = comp[0]
+      self.outComps.append(name)
 
       # what field name are we using in the code?
       # this should never fail, unless i messed up the aliases
@@ -249,17 +252,17 @@ class costCompare:
         key, self.totalCost[key], norm))
 
       for iComp, comp in enumerate(self.compNames):
+        outComp = self.outComps[iComp]
         if 'Full_k' in key:
           print('{:>100s}{:10.3e}'.format(
-            comp, self.costComps[key][comp]))
+            outComp, self.costComps[key][comp]))
         else:
-          print('{:>100s}{:10.3f}'.format(
-            comp, self.costComps[key][comp] * 100 / self.cost0[comp]))
+          print('{:>100s}{:10.3f}'.format(outComp, 
+            self.costComps[key][comp] * 100 / self.cost0[comp]))
         # endif key
       # end comp loop
     # end key loop
   # end costCalc()
-
 # end costCompare
 
 if __name__ == '__main__':
