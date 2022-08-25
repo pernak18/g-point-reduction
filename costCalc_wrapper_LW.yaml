@@ -1,0 +1,51 @@
+# Reference file (LBLRTM or CHARTS/LBL) path to 
+# RRTMGP-type netCDF flux file
+ref_path: lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc
+
+# Path to RRTMGP netCDF flux file for full k-distribution
+test_path: rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc
+
+# List of paths to additional test files that are
+# similar to test_path, but for additional formulations
+# (optimal angle, g-point reduction, etc.). The total cost
+# for these configurations are compared to the cost of test_file
+# needs to be a list, even if theres only 1
+others: [optimized_LW_fluxes.nc, optimized_LW_fluxes_iter001.nc]
+
+# LW or SW (if False) comparisons
+do_lw: True
+
+# boundary definitions (e.g., Garand)
+boundaries: &bounds [sfc, tpause, toa]
+level_indices:
+  surface: 0
+  tropopause: 26
+  top: 42
+
+# COST FUNCTION DEFINITION (components, levels, weights)
+# names, levels, and weights should be 1-1-1 mapping
+# Eli LW cost function
+components: 
+  # id: [component name, [levels], weight]
+  # component names should correspond to array names 
+  # in the netCDF files (case sensitive!)
+  # levels are lists of pressure levels to use in cost calculation
+  # sfc: Surface, tpause: Tropopause, toa: top-of-atmosphere, 
+  # all: all levels (implicitly a list); 0-offset index otherwise
+  1:  [flux_net, *bounds, 0.6]
+  2:  [band_flux_net, [toa], 0.04]
+  3:  [heating_rate, [all], 0.12]
+  4:  [heating_rate_4xco2, [all], 0.12]
+  5:  [flux_net_forcing_pi_pd-no2, *bounds, 0.01]
+  6:  [flux_net_forcing_4xch4, *bounds, 0.02]
+  7:  [flux_net_forcing_4xco2, *bounds, 0.04]
+  8:  [flux_net_forcing_ccl4, *bounds, 0.005]
+  9:  [flux_net_forcing_cfc11, *bounds, 0.005]
+  10: [flux_net_forcing_cfc12, *bounds, 0.005]
+  11: [flux_net_forcing_cfc22, *bounds, 0.005]
+  12: [flux_net_forcing_hfc143a, *bounds, 0.005]
+  13: [flux_net_forcing_hfc125, *bounds, 0.005]
+  14: [flux_net_forcing_hfc23, *bounds, 0.005]
+  15: [flux_net_forcing_hfc32, *bounds, 0.005]
+  16: [flux_net_forcing_hfc134a, *bounds, 0.005]
+  17: [flux_net_forcing_cf4, *bounds, 0.005]

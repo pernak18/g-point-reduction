@@ -1,0 +1,42 @@
+# COST FUNCTION DEFINITION (components, levels, weights)
+
+  parser.add_argument('--ref_path', '-r', type=str,
+    default='lblrtm-lw-flux-inputs-outputs-garandANDpreind.nc',
+    help='Reference file (LBLRTM or CHARTS/LBL) path to ' + \
+      'RRTMGP-type netCDF flux file.')
+  parser.add_argument('--test_path', '-t', type=str, \
+    default='rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc',
+    help='Path to RRTMGP netCDF flux file for full k-distribution.')
+  parser.add_argument('--others', '-o', type=str, nargs='+',
+    default=['optimized_fluxes.nc', 'optimized_fluxes_iter001.nc'],
+    help='List of paths to additional test files that are ' + \
+      'similar to --test_path, but for additional configurations ' + \
+      '(optimal angle, g-point reduction, etc.). The total cost ' + \
+      'for these configurations are compared to the cost of ' + \
+      '--test_file')
+  parser.add_argument('--sw', '-sw', action='store_true', \
+    help='Do shortwave cost instead of default longwave.')
+
+# Eli SW
+COMPS = ['flux_dif_net', 'flux_dir_dn', 'heating_rate',
+  'heating_rate_7', 'flux_net_forcing_5', 'flux_net_forcing_6',
+  'flux_net_forcing_7', 'flux_net_forcing_19']
+
+# 1 level key must exist for each COMPS string
+# indices of pressure levels to use in cost calculation
+# 0: Surface, 26: Tropopause, 42: TOA
+
+# Eli SW
+LEVELS = {}
+LEVELS['flux_dif_net'] = [0, 26, 42]
+LEVELS['flux_dir_dn'] = range(42)
+LEVELS['heating_rate'] = range(42)
+LEVELS['heating_rate_7'] = range(42)
+LEVELS['flux_net_forcing_5'] = [0,42]
+LEVELS['flux_net_forcing_6'] = [0,42]
+LEVELS['flux_net_forcing_7'] = [0,42]
+LEVELS['flux_net_forcing_19'] = [0,42]
+
+# 1 weight per COMPS string
+# Eli SW
+WEIGHTS = [0.1, 0.6, 0.05, 0.05, 0.02, 0.05, 0.11, 0.02]
