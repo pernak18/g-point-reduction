@@ -1,17 +1,8 @@
 #!/usr/bin/env python
 
-import os, sys, shutil, glob, pickle, copy
+import os, sys, glob, pickle
 
-os.chdir('/global/u1/p/pernak18/RRTMGP/g-point-reduction')
-os.chdir('/global/u2/k/kcadyper/g-point-reduction')
-
-# "standard" install
-import numpy as np
-
-# directory in which libraries installed with conda are saved
-PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-    'lib/python3.8/site-packages'
-PATHS = ['common', PIPPATH]
+PATHS = ['common']
 for path in PATHS: sys.path.append(path)
 
 # needed at AER unless i update `pandas`
@@ -19,11 +10,9 @@ import warnings
 #warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=Warning)
 
-# user must do `pip install xarray` on cori (or other NERSC machines)
-import xarray as xa
-
-# local module
-import by_band_lib as BYBAND
+# local modules
+import g_point_reduction as REDUX
+import flux_cost_compute as FCC
 
 GARAND = '/global/project/projectdirs/e3sm/pernak18/reference_netCDF/' + \
     'g-point-reduce/multi_garand_template_single_band.nc'

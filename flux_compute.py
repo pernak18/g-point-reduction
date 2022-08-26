@@ -1,22 +1,14 @@
 #!/usr/bin/env python
 
-import os, sys, shutil, glob, pickle, copy, time
-
-os.chdir('/global/u2/k/kcadyper/g-point-reduction/')
+import os, sys, glob, pickle, copy, time
 
 # "standard" install
 import numpy as np
 
-from multiprocessing import Pool
-
 import pathlib as PL
 
 # directory in which libraries installed with conda are saved
-PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-    'lib/python3.8/site-packages'
-# PIPPATH = '{}/.local/'.format(os.path.expanduser('~')) + \
-#     'cori/3.7-anaconda-2019.10/lib/python3.7/site-packages'
-PATHS = ['common', PIPPATH]
+PATHS = ['common']
 for path in PATHS: sys.path.append(path)
 
 # needed at AER unless i update `pandas`
@@ -24,11 +16,9 @@ import warnings
 #warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=Warning)
 
-# user must do `pip install xarray` on cori (or other NERSC machines)
-import xarray as xa
-
-# local module
-import by_band_lib as BYBAND
+# local modules
+import g_point_reduction as REDUX
+import flux_cost_compute as FCC
 
 PROJECT = '/global/project/projectdirs/e3sm/pernak18/'
 EXE = '{}/g-point-reduction/garand_atmos/rrtmgp_garand_atmos'.format(
@@ -38,7 +28,7 @@ REFDIR = '{}/reference_netCDF/g-point-reduce'.format(PROJECT)
 BANDSPLITDIR = 'band_k_dist'
 FULLBANDFLUXDIR = 'full_band_flux'
 
-for PATH in PATHS: BYBAND.pathCheck(PATH)
+for PATH in PATHS: FCC.pathCheck(PATH)
 
 CWD = os.getcwd()
 
@@ -56,9 +46,6 @@ if DOLW:
     KFULLNC = '{}/rrtmgp-data-lw-g256-jen-xs.nc'.format(REFDIR)
     REFNC = '{}/lblrtm-lw-{}'.format(REFDIR, fluxSuffix)
     TESTNC = '{}/rrtmgp-lw-{}'.format(REFDIR, fluxSuffix)
-    #TESTNC = './io.nc'
-    #TESTNC = '{}/profile-stats-plots/rrtmgp-lw-flux-inputs-outputs-garand-all.nc'.format(REFDIR)
-    #TESTNC = '{}/g-point-reduce/rrtmgp-lw-flux-inputs-outputs-garandANDpreind.nc'.format(REFDIR)
 else:
     GARAND = '{}/charts_multi_garand_template_single_band.nc'.format(REFDIR)
     KFULLNC = '{}/rrtmgp-data-sw-g224-2018-12-04.nc'.format(REFDIR)
@@ -80,18 +67,8 @@ CFCOMPS = ['flux_net', 'band_flux_net', 'heating_rate',
   'flux_net_forcing_11', 'flux_net_forcing_12', 'flux_net_forcing_13',
   'flux_net_forcing_14', 'flux_net_forcing_15', 'flux_net_forcing_16',
   'flux_net_forcing_17', 'flux_net_forcing_18']
-#CFCOMPS = ['flux_dif_net', 'flux_dir_dn', 'heating_rate']
-# CFCOMPS = ['flux_net','flux_net_forcing_8','flux_net_forcing_9','flux_net_forcing_10',
-#            'flux_net_forcing_11','flux_net_forcing_12','flux_net_forcing_13','flux_net_forcing_14',
-#            'flux_net_forcing_15','flux_net_forcing_16','flux_net_forcing_17']
-
-# level indices for each component 
-# (e.g., 0 for surface, 41 for Garand TOA)
-# one dictionary key per component so each component
-# can have its own set of level indices
 CFLEVS = {}
-#CFLEVS['heating_rate'] = range(41)
-#CFLEVS['flux_up'] = [26, 42]
+
 LEVELS = {}
 LEVELS['flux_net'] = [0, 26, 42]
 LEVELS['band_flux_net'] = [42]
@@ -111,62 +88,15 @@ LEVELS['flux_net_forcing_16'] = [0, 26, 42]
 LEVELS['flux_net_forcing_17'] = [0, 26, 42]
 LEVELS['flux_net_forcing_18'] = [0, 26, 42]
 CFLEVS = dict(LEVELS)
-#CFLEVS['flux_up_forcing_7'] = [26, 42]
-# CFLEVS['flux_dif_net'] = [0, 26, 42]
-# CFLEVS['flux_dir_dn'] = [0, 26]
-# CFLEVS['heating_rate'] = range(41)
-# for comp in CFCOMPS: CFLEVS[comp] = [0, 26, 42]
 
 # weights for each cost function component
 CFWGT = [0.6, 0.04, 0.12, 0.12, 0.01, 0.02, 0.04, 0.005,
         0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005,
         0.005]
-#CFWGT = [0.99] + [0.001] * 10
-
-"""
-CFCOMPS = ['flux_net','band_flux_net','heating_rate','heating_rate_7',
-           'flux_net_forcing_5','flux_net_forcing_6','flux_net_forcing_7',
-           'flux_net_forcing_9','flux_net_forcing_10','flux_net_forcing_11',
-           'flux_net_forcing_12','flux_net_forcing_13','flux_net_forcing_14',
-           'flux_net_forcing_15','flux_net_forcing_16','flux_net_forcing_17',
-           'flux_net_forcing_18']
-# level indices for each component
-# (e.g., 0 for surface, 41 for Garand TOA)
-# one dictionary key per component so each component
-# can have its own set of level indices
-CFLEVS = {}
-CFLEVS['flux_net'] = [0, 26, 42]
-CFLEVS['band_flux_net'] = [42]
-CFLEVS['heating_rate'] = list(range(41))
-CFLEVS['heating_rate_7'] = list(range(41))
-CFLEVS['flux_net_forcing_5'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_6'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_7'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_9'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_10'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_11'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_12'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_13'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_14'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_15'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_16'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_17'] = [0, 26, 42]
-CFLEVS['flux_net_forcing_18'] = [0, 26, 42]
-# weights for each cost function component
-CFWGT = [0.6, 0.04, 0.12, 0.12,
-         0.01, 0.02, 0.04,
-        0.005, 0.005, 0.005,
-        0.005, 0.005, 0.005,
-        0.005, 0.005, 0.005,
-        0.005]
-"""
-
-# Modified g-point weighting used when cost function starts to increase
 
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
 
-#with open('{}_k-dist.pickle'.format(DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
 with open('{}/{}_k-dist.pickle'.format(os.getcwd(), DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
 
 CFDIR = 'sfc_tpause_TOA_band_flux_up_down'
@@ -182,7 +112,7 @@ if RESTORE:
     print('Restoring {}'.format(pickleCost))
     with open(pickleCost, 'rb') as fp: coObj = pickle.load(fp)
 else:
-    coObj = BYBAND.gCombine_Cost(
+    coObj = FCC.gCombine_Cost(
         kBandDict, fullBandFluxes, REFNC, TESTNC, 1, DOLW, 
         profilesNC=GARAND, exeRRTMGP=EXE, cleanup=CLEANUP, 
         costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
@@ -190,10 +120,8 @@ else:
 # endif RESTORE
 
 # number of iterations for the optimization
-coSave = ' '
-NITER = 140
+NITER = 1
 DIAGNOSTICS = True
-print ("  ",file=open('new_weight_diag.txt','w'))
 for i in range(coObj.iCombine, NITER+1):
     t1 = time.process_time()
 
@@ -230,8 +158,6 @@ for i in range(coObj.iCombine, NITER+1):
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
-    import copy
-
 # Start of special g-point combination branch
     if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.1:
     #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
@@ -245,7 +171,7 @@ for i in range(coObj.iCombine, NITER+1):
            bandKey='band{}'.format(coObj.optBand+1)
        #sys.exit() 
         
-       newObj = BYBAND.gCombine_kDist(bandObj[bandKey].kInNC, coObj.optBand, DOLW,
+       newObj = REDUX.gCombine_kDist(bandObj[bandKey].kInNC, coObj.optBand, DOLW,
             i, fullBandKDir=BANDSPLITDIR,
             fullBandFluxDir=FULLBANDFLUXDIR)
        curkFile = os.path.basename(coObj.optNC)
@@ -270,10 +196,10 @@ for i in range(coObj.iCombine, NITER+1):
            fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
            print (fluxFile)
            print (newCoefFile)
-           BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
+           FCC.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
            trialNC = '{}/{}'.format(fluxDir,fluxFile)
-           coCopy.combinedNC[coObj.iOpt] = BYBAND.combineBandsSgl( 
+           coCopy.combinedNC[coObj.iOpt] = REDUX.combineBandsSgl( 
                    coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW)
            coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
            #coCopy.findOptimal()
@@ -320,10 +246,10 @@ for i in range(coObj.iCombine, NITER+1):
        print (newCoefFile,file=open('new_weight_diag.txt','a'))
        print (coeff[0],xMin,yArr,xWeightNew,file=open('new_weight_diag.txt','a'))
        print ("  ",file=open('new_weight_diag.txt','a'))
-       BYBAND.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
+       FCC.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
 
        trialNC = '{}/{}'.format(fluxDir,fluxFile)
-       coCopy.combinedNC[coObj.iOpt] = BYBAND.combineBandsSgl( 
+       coCopy.combinedNC[coObj.iOpt] = REDUX.combineBandsSgl( 
                coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW,)
        coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
        #coCopy.findOptimal()
@@ -352,7 +278,7 @@ ncFiles = [coObj.distBands[key].kInNC for key in coObj.distBands.keys()]
 coObj.kDistOpt(KFULLNC, kOutNC=KOUTNC)
 
 # combine flux netCDFs after optimized solutions over all trials are found
-BYBAND.combineBands(0, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
+REDUX.combineBands(0, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
                     coObj.doLW, finalDS=True, outNC='optimized_fluxes.nc')
 # print('New k-file {:.4f}'.format(time.process_time()-t1))
 
