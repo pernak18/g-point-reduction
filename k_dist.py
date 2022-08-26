@@ -12,11 +12,11 @@ warnings.simplefilter(action='ignore', category=Warning)
 
 # local modules
 import g_point_reduction as REDUX
-import flux_cost_compute as FCC
+from rrtmgp_cost_compute import flux_cost_compute as FCC
 
 GARAND = '/global/project/projectdirs/e3sm/pernak18/reference_netCDF/' + \
     'g-point-reduce/multi_garand_template_single_band.nc'
-BYBAND.pathCheck(GARAND)
+FCC.pathCheck(GARAND)
 
 BANDSPLITDIR = 'band_k_dist'
 FULLBANDFLUXDIR = 'full_band_flux'
@@ -44,11 +44,9 @@ test = True
 # shouldn't have to run it multiple times
 kBandDict = {}
 for iBand, kFile in enumerate(kFiles):
-    print(iBand)
-    print (kFile)
     #if test and iBand != 0: continue
     band = iBand + 1
-    kObj = BYBAND.gCombine_kDist(kFile, iBand, DOLW, 1, 
+    kObj = REDUX.gCombine_kDist(kFile, iBand, DOLW, 1, 
         fullBandKDir=BANDSPLITDIR, 
         fullBandFluxDir=FULLBANDFLUXDIR, cleanup=CLEANUP)
     kObj.gPointCombine()
@@ -57,4 +55,5 @@ for iBand, kFile in enumerate(kFiles):
     print('Band {} complete'.format(band))
 # end kFile loop
 
-with open('{}_k-dist.pickle'.format(DOMAIN), 'wb') as fp: pickle.dump(kBandDict, fp)
+with open('{}_k-dist.pickle'.format(DOMAIN), 'wb') as fp:
+  pickle.dump(kBandDict, fp)

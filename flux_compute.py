@@ -18,7 +18,7 @@ warnings.simplefilter(action='ignore', category=Warning)
 
 # local modules
 import g_point_reduction as REDUX
-import flux_cost_compute as FCC
+from rrtmgp_cost_compute import flux_cost_compute as FCC
 
 PROJECT = '/global/project/projectdirs/e3sm/pernak18/'
 EXE = '{}/g-point-reduction/garand_atmos/rrtmgp_garand_atmos'.format(
@@ -59,6 +59,8 @@ PATHS = [KFULLNC, EXE, TESTNC, REFNC, GARAND]
 # and iterations of combinations in bandOptimize()
 CLEANUP = False
 
+CLOCK = False
+
 CFCOMPS = ['band_flux_up', 'band_flux_dn']
 CFCOMPS = ['flux_net_forcing_19', 'flux_dir_dn', 'flux_dif_dn', 'flux_net', 'flux_net_forcing_5']
 CFCOMPS = ['flux_net', 'band_flux_net', 'heating_rate',
@@ -97,14 +99,12 @@ CFWGT = [0.6, 0.04, 0.12, 0.12, 0.01, 0.02, 0.04, 0.005,
 fullBandFluxes = sorted(glob.glob('{}/flux_{}_band??.nc'.format(
         FULLBANDFLUXDIR, DOMAIN)))
 
-with open('{}/{}_k-dist.pickle'.format(os.getcwd(), DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
+with open('{}/{}_k-dist.pickle'.format(
+  os.getcwd(), DOMAIN), 'rb') as fp: kBandDict = pickle.load(fp)
 
-CFDIR = 'sfc_tpause_TOA_band_flux_up_down'
-CFDIR = 'salami'
-CFDIR = 'direct-down'
-CFDIR = 'xsecs_test_eli'
+CFDIR = 'fullCF_top-layer_redo_abs_parabola'
 
-RESTORE = True
+RESTORE = False
 pickleCost = '{}_cost-optimize.pickle'.format(DOMAIN)
 
 if RESTORE:
@@ -112,12 +112,16 @@ if RESTORE:
     print('Restoring {}'.format(pickleCost))
     with open(pickleCost, 'rb') as fp: coObj = pickle.load(fp)
 else:
-    coObj = FCC.gCombine_Cost(
+    coObj = REDUX.gCombine_Cost(
         kBandDict, fullBandFluxes, REFNC, TESTNC, 1, DOLW, 
         profilesNC=GARAND, exeRRTMGP=EXE, cleanup=CLEANUP, 
         costFuncComp=CFCOMPS, costFuncLevs=CFLEVS, 
         costWeights=CFWGT, test=False, optDir='./{}'.format(CFDIR))
 # endif RESTORE
+
+# modified formulation: https://github.com/pernak18/g-point-reduction/wiki/Modified-g-Point-Combining
+PARABOLA = False
+MODWEIGHTS = False
 
 # number of iterations for the optimization
 NITER = 1
@@ -135,151 +139,55 @@ for i in range(coObj.iCombine, NITER+1):
     print('Iteration {}'.format(i))
     temp = time.process_time()
     coObj.kMap()
-    # print('kMap: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
+    if CLOCK: 
+      print('kMap: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
 
     temp = time.process_time()
     coObj.fluxComputePool()
-    # print('Flux Compute: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
+    if CLOCK: print('Flux Compute: {:.4f}, {:10.4e}'.format(
+      time.process_time()-temp))
 
     temp = time.process_time()
     coObj.fluxCombine()
-    # print('Flux Combine: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
+    if CLOCK: print('Flux Combine: {:.4f}, {:10.4e}'.format(
+      time.process_time()-temp))
 
     temp = time.process_time()
     coObj.costFuncComp(init=True)
     coObj.costFuncComp()
-    # print('Cost function computation: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
+    if CLOCK: print('Cost function computation: {:.4f}, {:10.4e}'.format(
+      time.process_time()-temp))
 
     temp = time.process_time()
     coObj.findOptimal()
-    # print('findOptimal: {:.4f}, {:10.4e}'.format(time.process_time()-temp))
-
+    if CLOCK: print('findOptimal: {:.4f}, {:10.4e}'.format(
+      time.process_time()-temp))
 
     if coObj.optimized: break
     if DIAGNOSTICS: coObj.costDiagnostics()
 
-# Start of special g-point combination branch
-    if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.1:
-    #if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > -2.01:
-       print ('will change here')
-       xWeight = 0.05
-       delta0 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
-       bandObj = coObj.distBands
-       if (coObj.optBand+1) < 10:
-           bandKey='band0{}'.format(coObj.optBand+1)
-       else:
-           bandKey='band{}'.format(coObj.optBand+1)
-       #sys.exit() 
-        
-       newObj = REDUX.gCombine_kDist(bandObj[bandKey].kInNC, coObj.optBand, DOLW,
-            i, fullBandKDir=BANDSPLITDIR,
-            fullBandFluxDir=FULLBANDFLUXDIR)
-       curkFile = os.path.basename(coObj.optNC)
-       ind = curkFile.find('_g')
-       g1 = int(curkFile[ind+2:ind+4])
-       g2 = int(curkFile[ind+5:ind+7])
-       gCombine =[[g1-1,g2-1]]
-
-       print (newObj.workDir)
-       ind = curkFile.find('coeff')
-       print (curkFile)
-       fluxPath = PL.Path(curkFile[ind:]).with_suffix('')
-       fluxDir = '{}/{}'.format(newObj.workDir,fluxPath)
-
-       parr =['plus','minus']
-       for pmFlag in parr:
-           coCopy = copy.deepcopy(coObj)
-           print ("  ")
-           print (pmFlag)
-           newObj.gPointCombineSglPair(pmFlag,gCombine,xWeight)
-           newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
-           fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
-           print (fluxFile)
-           print (newCoefFile)
-           FCC.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
-
-           trialNC = '{}/{}'.format(fluxDir,fluxFile)
-           coCopy.combinedNC[coObj.iOpt] = REDUX.combineBandsSgl( 
-                   coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW)
-           coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
-           #coCopy.findOptimal()
-        
-           if DIAGNOSTICS: coCopy.costDiagnostics()
-           if(pmFlag == 'plus'):
-               deltaPlus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
-           if(pmFlag == 'minus'):
-               deltaMinus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
-
-# Fit change in cost of three g-point options to a parabola and find minimum weight if parabola is concave;
-#  if that weight is outside the (-0.1,0.1) range or the parabola is convex use the weight that leads to 
-# the smallest increase or largest decrease in the  cost function;
-
-       print ("  ")
-       print ("New weight calculation")
-       xArr = [-xWeight,0.,xWeight]
-       yArr = [deltaMinus,delta0,deltaPlus]
-       print (yArr)
-       ymin = min(yArr)
-       imin = yArr.index(ymin)
-       coeff = np.polyfit(xArr,yArr,2)
-       print (coeff[0])
-       xMin = -coeff[1]/(2.*coeff[0])
-       if (coeff[0] >0.):
-           print ("concave parabola ",xMin)
-           if (xMin < -xWeight or xMin > xWeight):
-               xWeightNew = xArr[imin]
-           else:
-               xWeightNew = xMin
-       else:
-           xWeightNew = xArr[imin]
-       print (xWeightNew)
-
-# Define newest g-point combination
-       coCopy = copy.deepcopy(coObj)
-       pmFlag = 'mod'
-       print ("  ")
-       print (pmFlag)
-       newObj.gPointCombineSglPair(pmFlag,gCombine,xWeightNew)
-       newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
-       fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
-       print (newCoefFile)
-       print (newCoefFile,file=open('new_weight_diag.txt','a'))
-       print (coeff[0],xMin,yArr,xWeightNew,file=open('new_weight_diag.txt','a'))
-       print ("  ",file=open('new_weight_diag.txt','a'))
-       FCC.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
-
-       trialNC = '{}/{}'.format(fluxDir,fluxFile)
-       coCopy.combinedNC[coObj.iOpt] = REDUX.combineBandsSgl( 
-               coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW,)
-       coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
-       #coCopy.findOptimal()
-    
-       if DIAGNOSTICS: coCopy.costDiagnostics()
-       print ("delta cost")
-       print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)
-       coObj = copy.deepcopy(coCopy)
-       del coCopy
-# End of spoecial g-point combination branch
+    if PARABOLA: REDUX.modCombine()
     
     coObj.setupNextIter()
 
     temp = time.process_time()
     with open(pickleCost, 'wb') as fp: pickle.dump(coObj, fp)
-#     print('Pickle: {:.4f}'.format(time.process_time()-temp))
+    if CLOCK: print('Pickle: {:.4f}'.format(
+      time.process_time()-temp))
 
-#     print('Full iteration: {:.4f}'.format(time.process_time()-t1))
+    if CLOCK: print('Full iteration: {:.4f}'.format(
+      time.process_time()-t1))
 # end iteration loop
 
 t1 = time.process_time()
 KOUTNC = 'rrtmgp-data-{}-g-red.nc'.format(DOMAIN)
 
 ncFiles = [coObj.distBands[key].kInNC for key in coObj.distBands.keys()]
-# kDistOpt(KFULLNC, kOutNC=KOUTNC)
 coObj.kDistOpt(KFULLNC, kOutNC=KOUTNC)
 
 # combine flux netCDFs after optimized solutions over all trials are found
-REDUX.combineBands(0, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
+FCC.combineBands(0, coObj.fullBandFluxes, coObj.fullBandFluxes[0], 
                     coObj.doLW, finalDS=True, outNC='optimized_fluxes.nc')
-# print('New k-file {:.4f}'.format(time.process_time()-t1))
+if CLOCK: print('New k-file {:.4f}'.format(time.process_time()-t1))
 
 print('Optimization complete')
