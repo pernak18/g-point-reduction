@@ -279,8 +279,8 @@ def combineBandsSgl(iBand,fullNC,trialNC,lw,outNC='trial_band_combined.nc', fina
     inBand = int(iBand)
     outDS = xa.Dataset()
      
-    print ("in CombineBandsSgl")
-    print (trialNC)
+    #print ("in CombineBandsSgl")
+    #print (trialNC)
 
     # If trial data and flux data are  coming in as NC, store in xarray
     with xa.open_dataset(trialNC) as trialDS:
@@ -521,7 +521,7 @@ def costCalc(lblNC, testNC, doLW, compNameCF, pLevCF, costComp0, scale, init):
         # get array for variable, then compute its test-ref RMS
         # over all columns at given pressure levels for a given
         # forcing scenario
-        cfDA = getattr(subsetErr, compDS)**2
+        cfDA = getattr(np.fabs(subsetErr), compDS)
 
         # determine which dimensions over which to average
         dims = subsetErr[compDS].dims
@@ -947,9 +947,9 @@ class gCombine_kDist:
             # and associated weights for given band
             nNew = kDS.dims['gpt']-1
             wCombine = [weights[np.array(gc)] for gc in gCombine]
-            print ("in gPointCombineSglPair")
-            print ("self.iCombine")
-            print (self.iCombine)
+            #print ("in gPointCombineSglPair")
+            #print ("self.iCombine")
+            #print (self.iCombine)
 
             for gc, wc in zip(gCombine, wCombine):
                 g1, g2 = gc
@@ -974,10 +974,10 @@ class gCombine_kDist:
                 # band and iteration in given band
                 outDS.attrs['g_combine'] = '{}+{}'.format(g1+1, g2+1)
 
-                if pmFlag == 'plus' or pmFlag == 'mod':
-                    nscale = 1
+                if pmFlag == '2plus':
+                    nscale = 2
                 else:
-                    nscale=-1
+                    nscale= 1
                 for ncVar in ncVars:
                     ncDat = xa.DataArray(kDS[ncVar])
                     varDims = ncDat.dims
@@ -992,6 +992,7 @@ class gCombine_kDist:
                             # g1 and g2;
                             # dimensions get swapped for some reason
                             delta = xWeight*nscale
+                            print(xWeight,nscale,pmFlag,delta)
                             kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
                                 kg1*((w1/(w1+w2))+delta) + kg2*((w2/(w1+w2))-delta),ncDat)
@@ -1442,7 +1443,7 @@ class gCombine_Cost:
 
         while True:
             # find optimizal k-distribution
-            self.iOpt = np.nanargmin(self.dCost)
+            self.iOpt = np.nanargmin(np.abs(self.dCost))
             optNC = self.fluxInputsAll[self.iOpt]['kNC']
 
             # if no more g-point combining is possible for associated band, 
@@ -1799,13 +1800,12 @@ class gCombine_Cost:
         distribution across all bands
         """
 
-        """
         fullDS = []
         for bandNC in self.fullBandFluxes:
             with xa.open_dataset(bandNC) as bandDS: fullDS.append(bandDS)
 
         finalDS = combineBands(
-            0, self.fullBandFluxes, self.fullBandFluxes[0], self.doLW, finalDS=True)
-        finalDS.to_netcdf(fluxOutNC)
-        """
+            0, self.fullBandFluxes, self.fullBandFluxes[0], self.doLW, 
+            finalDS=True, outNC=fluxOutNC)
+        # finalDS.to_netcdf(fluxOutNC)
     # end calcOptFlux()
