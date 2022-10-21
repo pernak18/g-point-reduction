@@ -1,6 +1,7 @@
 # standard libraries
 import os, sys, shutil
 import multiprocessing
+import pathlib as PL
 
 # "standard" pip/conda install
 import numpy as np
@@ -15,7 +16,7 @@ for path in PATHS: sys.path.append(path)
 import xarray as xa
 
 # local module (part of repo)
-import flux_cost_compute as FCC
+from rrtmgp_cost_compute import flux_cost_compute as FCC
 
 # GLOBAL VARIABLES (paths)
 PROJECT = '/global/project/projectdirs/e3sm/pernak18/'
@@ -1294,108 +1295,118 @@ class gCombine_Cost:
     # end calcOptFlux()
 # end gCombine_cost
 
-def modCombine(inObj, inIdx):
+def modCombine(inObj, iTrial, inBand, costCutoff=0.1, 
+               xWeight=0.05, diagnostics=False, 
+               kDirIn='band_k_dist', fluxDirIn='full_band_flux'):
   """
   https://github.com/pernak18/g-point-reduction/wiki/Modified-g-Point-Combining
+
+  Karen's code pulled from flux_compute.py
   """
 
-  if coObj.dCost[coObj.iOpt]-coObj.deltaCost0 > 0.1:
-    print ('will change here')
-    xWeight = 0.05
-    delta0 = coObj.dCost[coObj.iOpt]-coObj.deltaCost0
-    bandObj = coObj.distBands
-    if (coObj.optBand+1) < 10:
-       bandKey='band0{}'.format(coObj.optBand+1)
-    else:
-       bandKey='band{}'.format(coObj.optBand+1)
-    #sys.exit() 
-        
-    newObj = REDUX.gCombine_kDist(bandObj[bandKey].kInNC, coObj.optBand, DOLW,
-        i, fullBandKDir=BANDSPLITDIR,
-        fullBandFluxDir=FULLBANDFLUXDIR)
-    curkFile = os.path.basename(coObj.optNC)
+  import copy
+
+  # TO DO: should this be an absolute value cutoff?
+  delta = inObj.dCost[inObj.iOpt]-inObj.deltaCost0
+
+  if delta > costCutoff:
+    delta0 = float(delta)
+    bandObj = inObj.distBands
+    bandKey = 'band{:02d}'.format(inBand+1)
+
+    # clean slate of g-point combining for optimized band
+    newObj = gCombine_kDist(bandObj[bandKey].kInNC, inObj.optBand, 
+        inObj.doLW, iTrial, fullBandKDir=kDirIn, 
+        fullBandFluxDir=fluxDirIn)
+
+    # to do: better way to extract g-point numbers?
+    curkFile = os.path.basename(inObj.optNC)
     ind = curkFile.find('_g')
     g1 = int(curkFile[ind+2:ind+4])
     g2 = int(curkFile[ind+5:ind+7])
-    gCombine =[[g1-1,g2-1]]
+    gCombine =[[g1-1, g2-1]]
 
-    print (newObj.workDir)
     ind = curkFile.find('coeff')
-    print (curkFile)
     fluxPath = PL.Path(curkFile[ind:]).with_suffix('')
-    fluxDir = '{}/{}'.format(newObj.workDir,fluxPath)
+    fluxDir = '{}/{}'.format(newObj.workDir, fluxPath)
 
-    parr =['plus','minus']
+    parr =['plus', '2plus']
     for pmFlag in parr:
-      coCopy = copy.deepcopy(coObj)
-      print ("  ")
-      print (pmFlag)
-      newObj.gPointCombineSglPair(pmFlag,gCombine,xWeight)
-      newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
-      fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
-      print (fluxFile)
-      print (newCoefFile)
-      FCC.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
+      coCopy = copy.deepcopy(inObj)
+      newObj.gPointCombineSglPair(pmFlag, gCombine, xWeight)
+      newCoefFile = '{}/{}_{}.nc'.format(
+        newObj.workDir, fluxPath, pmFlag)
+      fluxFile = os.path.basename(newCoefFile).replace(
+        'coefficients', 'flux')
+      FCC.fluxCompute(newCoefFile, GARAND, EXE, fluxDir, fluxFile)
 
-      trialNC = '{}/{}'.format(fluxDir,fluxFile)
-      coCopy.combinedNC[coObj.iOpt] = FCC.combineBandsSgl( 
-             coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW)
-      coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
-      #coCopy.findOptimal()
+      trialNC = '{}/{}'.format(fluxDir, fluxFile)
+      coCopy.combinedNC[inObj.iOpt] = FCC.combineBandsSgl( 
+             inObj.optBand, inObj.fullBandFluxes, trialNC, inObj.doLW)
+      coCopy.costFuncCompSgl(coCopy.combinedNC[inObj.iOpt])
 
-      if DIAGNOSTICS: coCopy.costDiagnostics()
+      if diagnostics: coCopy.costDiagnostics()
+
+      if(pmFlag == '2plus'):
+        delta2Plus = coCopy.dCost[inObj.iOpt]-coCopy.deltaCost0
       if(pmFlag == 'plus'):
-        deltaPlus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
-      if(pmFlag == 'minus'):
-        deltaMinus = coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0
+        deltaPlus = coCopy.dCost[inObj.iOpt]-coCopy.deltaCost0
 
-# Fit change in cost of three g-point options to a parabola and find minimum weight if parabola is concave;
-#  if that weight is outside the (-0.1,0.1) range or the parabola is convex use the weight that leads to 
-# the smallest increase or largest decrease in the  cost function;
+      # Fit change in cost of three g-point options to a parabola and
+      # find minimum weight if parabola is concave;
+      # if that weight is outside the (-0.1,0.1) range or the 
+      # parabola is convex use the weight that leads to the 
+      # smallest increase or largest decrease in the  cost function;
 
-       print ("  ")
-       print ("New weight calculation")
-       xArr = [-xWeight,0.,xWeight]
-       yArr = [deltaMinus,delta0,deltaPlus]
-       print (yArr)
-       ymin = min(yArr)
-       imin = yArr.index(ymin)
-       coeff = np.polyfit(xArr,yArr,2)
-       print (coeff[0])
-       xMin = -coeff[1]/(2.*coeff[0])
-       if (coeff[0] >0.):
-           print ("concave parabola ",xMin)
-           if (xMin < -xWeight or xMin > xWeight):
-               xWeightNew = xArr[imin]
-           else:
-               xWeightNew = xMin
-       else:
-           xWeightNew = xArr[imin]
-       print (xWeightNew)
+    xArr = [0.,xWeight,2.*xWeight]
+    yArr = [delta0,deltaPlus,delta2Plus]
+    ymin = min(yArr)
+    imin = yArr.index(ymin)
+    coeff = np.polyfit(xArr,yArr,2)
+    xMin = -coeff[1]/(2.*coeff[0])
+    if (yArr[imin] < 0):
+      xWeightNew = xArr[imin] - xArr[imin] * yArr[imin] / (yArr[imin]-yArr[0])
+    else:       
+      if (coeff[0] >0.):
+        print ("concave parabola ",xMin)
+        if (xMin < -xWeight or xMin > xWeight):
+          xWeightNew = xArr[imin]
+        else:
+          xWeightNew = xMin
+      else:
+        xWeightNew = xArr[imin]
+      # endif coeff0
+    # endif yArr_min
+    print (xWeightNew)
 
-# Define newest g-point combination
-       coCopy = copy.deepcopy(coObj)
-       pmFlag = 'mod'
-       print ("  ")
-       print (pmFlag)
-       newObj.gPointCombineSglPair(pmFlag,gCombine,xWeightNew)
-       newCoefFile = '{}/{}_{}.nc'.format(newObj.workDir,fluxPath,pmFlag)
-       fluxFile = os.path.basename(newCoefFile).replace('coefficients', 'flux')
-       print (newCoefFile)
-       print (newCoefFile,file=open('new_weight_diag.txt','a'))
-       print (coeff[0],xMin,yArr,xWeightNew,file=open('new_weight_diag.txt','a'))
-       print ("  ",file=open('new_weight_diag.txt','a'))
-       FCC.fluxCompute(newCoefFile,GARAND,EXE,fluxDir,fluxFile)
+    # Define newest g-point combination
+    coCopy = copy.deepcopy(inObj)
+    pmFlag = 'mod'
+    newObj.gPointCombineSglPair(pmFlag, gCombine, xWeightNew)
+    newCoefFile = '{}/{}_{}.nc'.format(
+      newObj.workDir, fluxPath, pmFlag)
+    fluxFile = os.path.basename(newCoefFile).replace(
+      'coefficients', 'flux')
 
-       trialNC = '{}/{}'.format(fluxDir,fluxFile)
-       coCopy.combinedNC[coObj.iOpt] = REDUX.combineBandsSgl( 
-               coObj.optBand, coObj.fullBandFluxes,trialNC,DOLW,)
-       coCopy.costFuncCompSgl(coCopy.combinedNC[coObj.iOpt])
-       #coCopy.findOptimal()
-    
-       if DIAGNOSTICS: coCopy.costDiagnostics()
-       print ("delta cost")
-       print(coCopy.dCost[coObj.iOpt]-coCopy.deltaCost0)
-       coObj = copy.deepcopy(coCopy)
-       del coCopy
+    # TO DO: what the heck is happening here?
+    """
+    print (newCoefFile)
+    print (newCoefFile, file=open('new_weight_diag.txt','a'))
+    print (coeff[0], xMin, yArr, xWeightNew,
+           file=open('new_weight_diag.txt','a'))
+    print ("  ",file=open('new_weight_diag.txt','a'))
+    """
+
+    FCC.fluxCompute(newCoefFile, GARAND, EXE, fluxDir, fluxFile)
+
+    trialNC = '{}/{}'.format(fluxDir, fluxFile)
+    coCopy.combinedNC[inObj.iOpt] = FCC.combineBandsSgl( 
+      inObj.optBand, inObj.fullBandFluxes, trialNC, inObj.doLW)
+    coCopy.costFuncCompSgl(coCopy.combinedNC[inObj.iOpt])
+
+    if diagnostics: coCopy.costDiagnostics()
+    print ("delta cost")
+    print(coCopy.dCost[inObj.iOpt] - coCopy.deltaCost0)
+
+    return copy.deepcopy(coCopy)
 # end modCombine()
