@@ -1442,8 +1442,11 @@ def modCombine(inObj, iTrial, inBand, costCutoff=0.1,
     coCopy.combinedNC[inObj.iOpt] = FCC.combineBandsSgl( 
       inObj.optBand, inObj.fullBandFluxes, trialNC, inObj.doLW)
     coCopy.costFuncCompSgl(coCopy.combinedNC[inObj.iOpt])
+    coCopy.fluxInputsAll[inObj.iOpt]['fluxNC'] = str(trialNC)
 
     if diagnostics: coCopy.costDiagnostics()
 
-    return DCP(coCopy)
+    return coCopy
+  else:
+    return inObj
 # end modCombine()
