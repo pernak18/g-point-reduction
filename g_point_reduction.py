@@ -690,6 +690,7 @@ class gCombine_Cost:
         self.costComps = {}
         self.dCostComps0 = {}
         self.dCostComps = {}
+        self.scaleDiag = {}
 
         # total cost of combining given g-points; should be one 
         # element per combination
@@ -935,9 +936,23 @@ class gCombine_Cost:
         optimized the cost function, save the associated k netCDF
         """
 
+        # offset: dCost from previous iteration; only needed for diagnostics
+        # temporary workaround to address 23nov Eli run
+        # TO DO: verify and make permanent
+        if self.iCombine > 1:
+            self.deltaCost0 = sum([self.dCost0[comp][-1] for comp in self.compNameCF])
+        else:
+            self.deltaCost0 = 0
+        # endif iCombine
+
         while True:
+            # temporary workaround to address 23nov Eli run
+            # want delta wrt previous iteration, 
+            # which amounts to delta-delta-cost
+            # TO DO: verify and make permanent
+            ddCost = np.array(self.dCost) - self.deltaCost0
             # find optimizal k-distribution
-            self.iOpt = np.nanargmin(np.abs(self.dCost))
+            self.iOpt = np.nanargmin(np.abs(ddCost))
             optNC = self.fluxInputsAll[self.iOpt]['kNC']
 
             # if no more g-point combining is possible for associated band, 
@@ -984,16 +999,12 @@ class gCombine_Cost:
         """
 
         # offset: dCost from previous iteration; only needed for diagnostics
-        if self.iCombine > 1:
-            self.deltaCost0 = [self.dCost0[comp][-1] for comp in self.compNameCF]
-            self.deltaCost0 = sum(self.deltaCost0)
-        else:
-            self.deltaCost0 = 0
-        # endif iCombine
+        dCost0 = sum([self.dCost0[comp][-1] for comp in self.compNameCF]) if \
+            self.iCombine > 1 else -0
 
         print('{}, Trial: {:d}, Cost: {:4f}, Delta-Cost: {:.4f}'.format(
             os.path.basename(self.optNC), self.iOpt+1, 
-            self.totalCost[self.iOpt], (self.dCost[self.iOpt] - self.deltaCost0)))
+            self.totalCost[self.iOpt], (self.dCost[self.iOpt] - dCost0)))
 
         diagDir = '{}/diagnostics'.format(self.optDir)
         FCC.pathCheck(diagDir, mkdir=True)
@@ -1066,16 +1077,31 @@ class gCombine_Cost:
         newObj.gPointCombine()
         self.distBands['band{:02d}'.format(self.optBand+1)] = newObj
         
-        # reset cost optimization attributes
-        #self.modBand = [int(self.optBand)]
+        # scale indices and keys for comp loop (`scale` def.)
+        # TO DO: -2 is because we're doing `init=True` twice (unnecessarily)
+        # but results were wrong with -1 and init=False
+        sIndices = [0, -2]
+        sKeys = ['cost', 'dCost']
         for weight, comp in zip(self.costWeights, self.compNameCF):
             pStr = 'lay' if 'heating_rate' in comp else 'lev'
 
-            scale = weight * 100 / self.cost0[comp][0]
+            # cost and delta-cost scales have different baselines: 
+            # cost is wrt non-reduced k-dist; dCost is wrt previous iteration
+            scale = {}
+            for sIdx, key in zip(sIndices, sKeys):
+              scale[key] = weight * 100 / self.cost0[comp][sIdx]
+
             self.costComp0[comp] = self.costComps[comp][self.iOpt]
             self.dCostComps0[comp] = self.dCostComps[comp][self.iOpt]
-            self.cost0[comp].append(self.costComp0[comp].sum().values * scale)
-            self.dCost0[comp].append(self.dCostComps0[comp].sum().values * scale)
+
+            # TO DO: should this be a replace rather than append?
+            self.cost0[comp].append(
+              self.costComp0[comp].sum().values * scale['cost'])
+            self.dCost0[comp].append(
+              self.dCostComps0[comp].sum().values * scale['dCost'])
+
+            # keep the scaling for diagnostics
+            # self.scaleDiag[comp] = dict(scale)
         # end comp loop
 
         self.fullBandFluxes[int(self.optBand)] = \
@@ -1443,6 +1469,8 @@ def modCombine(inObj, iTrial, inBand, costCutoff=0.1,
       inObj.optBand, inObj.fullBandFluxes, trialNC, inObj.doLW)
     coCopy.costFuncCompSgl(coCopy.combinedNC[inObj.iOpt])
     coCopy.fluxInputsAll[inObj.iOpt]['fluxNC'] = str(trialNC)
+    coCopy.fluxInputsAll[inObj.iOpt]['kNC'] = str(newCoefFile)
+    coCopy.optNC = str(newCoefFile)
 
     if diagnostics: coCopy.costDiagnostics()
 
