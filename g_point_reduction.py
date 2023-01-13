@@ -485,7 +485,7 @@ class gCombine_kDist:
                             # g1 and g2;
                             # dimensions get swapped for some reason
                             delta = xWeight*nscale
-                            print(xWeight,nscale,pmFlag,delta)
+                            # print(xWeight,nscale,pmFlag,delta)
                             kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
                                 kg1*((w1/(w1+w2))+delta) + kg2*((w2/(w1+w2))-delta),ncDat)
@@ -558,8 +558,10 @@ class gCombine_kDist:
 
                 for minStart, minLim in zip(self.kMinorStart, self.kMinorLims):
                     outDS[minStart] = outDS[minLim][:,1].cumsum()-nNew+1
-                    
+
                 outDS.to_netcdf(outNC, 'w')
+
+                return outNC
             # end combination loop
         # endwith kDS
     # end gPointCombineSgl()
@@ -1301,161 +1303,3 @@ class gCombine_Cost:
             finalDS=True, outNC=fluxOutNC)
     # end calcOptFlux()
 # end gCombine_cost
-
-def modCombine(inObj, iTrial, inBand, costCutoff=0.1, 
-               xWeight=0.05, xWeightCoeff=[0, 1, 2], 
-               diagnostics=False, profiles=GARAND, fluxExe=EXE, 
-               kDirIn='band_k_dist', fluxDirIn='full_band_flux'):
-  """
-  https://github.com/pernak18/g-point-reduction/wiki/Modified-g-Point-Combining
-  https://github.com/pernak18/g-point-reduction/issues/19
-
-  Karen's code pulled from flux_compute.py
-
-  Lots of "parabola" talk, but in the end, this became a linear fit
-
-  Call
-    modObj = modCombine(inObj, iTrial, inBand, costCutoff=0.1, 
-               xWeight=0.05, diagnostics=False, 
-               profiles=GARAND, fluxExe=EXE, 
-               kDirIn='band_k_dist', fluxDirIn='full_band_flux')
-  
-  Input
-    inObj -- gCombine_cost object that was used in preceding 
-      unmodified g-point combination
-    iTrial -- int, trial that was selected as the optimal g-point 
-      combination in unmodified procedure
-    iBand -- int, band from which iTrial was chosen
-
-  Output
-    modObj -- gCombine_cost object for which optimal combination WITH
-      modified weights has been selected
-
-  Keywords
-    costCutoff -- float, cost at which modified combining is triggered
-    xWeight -- float, starting weight used on g-points
-    xWeightCoeff -- float list, coefficients of each point in line 
-      that is fit when detemining modified g-point weight; each 
-      element is multiplied by xWeight to generate abscissa
-    diagnostics -- boolean, display cost and component costs for each
-      formulation of g-point combining
-    profiles -- string, path to netCDF with (Garand) profile 
-      specifications
-    fluxExe -- string, path to RRTMGP flux computation executable 
-      that will be run with profile specs
-    kDirIn -- string, directory under which band-separate full 
-      band k-distributions exist
-    fluxDirIn -- string, directory under which band-separate full 
-      band fluxes exists
-  """
-
-  from copy import deepcopy as DCP
-
-  # TO DO: should this be an absolute value cutoff?
-  # inDelta = inObj.dCost[inObj.iOpt]-inObj.deltaCost0
-  inDelta = np.abs(inObj.totalCost[inObj.iOpt]-inObj.winnerCost)
-
-  delta = {}
-  if inDelta > costCutoff:
-    delta['init'] = float(inDelta)
-    bandObj = inObj.distBands
-    bandKey = 'band{:02d}'.format(inBand+1)
-
-    # clean slate of g-point combining for optimized band
-    newObj = gCombine_kDist(bandObj[bandKey].kInNC, inObj.optBand, 
-        inObj.doLW, iTrial, fullBandKDir=kDirIn, 
-        fullBandFluxDir=fluxDirIn)
-
-    # to do: better way to extract g-point numbers?
-    curkFile = os.path.basename(inObj.optNC)
-    ind = curkFile.find('_g')
-    g1 = int(curkFile[ind+2:ind+4])
-    g2 = int(curkFile[ind+5:ind+7])
-    gCombine =[[g1-1, g2-1]]
-
-    ind = curkFile.find('coeff')
-    fluxPath = PL.Path(curkFile[ind:]).with_suffix('')
-    fluxDir = '{}/{}'.format(newObj.workDir, fluxPath)
-
-    # store delta-costs for modified g-point combos, which 
-    # whose weights have been scaled differently
-    scaleWeight = ['plus', '2plus']
-    for sWgt in scaleWeight:
-      # copy the cost-optmization object so we can carry out same 
-      # operations on modified g-point combos
-      coCopy = DCP(inObj)
-      newObj.gPointCombineSglPair(sWgt, gCombine, xWeight)
-      newCoefFile = '{}/{}_{}.nc'.format(
-        newObj.workDir, fluxPath, sWgt)
-
-      # calculate and save fluxes corresponding to new combos
-      fluxFile = os.path.basename(newCoefFile).replace(
-        'coefficients', 'flux')
-      FCC.fluxCompute(
-        newCoefFile, profiles, fluxExe, fluxDir, fluxFile)
-
-      # calculate associated costs of all possible combinations 
-      # combine trials from band in question with untouched 
-      # flux files from other bands
-      trialNC = '{}/{}'.format(fluxDir, fluxFile)
-      coCopy.combinedNC[inObj.iOpt] = FCC.combineBandsSgl( 
-             inObj.optBand, inObj.fullBandFluxes, trialNC, inObj.doLW)
-      coCopy.costFuncCompSgl(coCopy.combinedNC[inObj.iOpt])
-
-      # print cost and cost components for given scale
-      if diagnostics: coCopy.costDiagnostics()
-
-      # save delta-cost
-      delta[sWgt] = coCopy.totalCost[inObj.iOpt]-inObj.winnerCost
-    # end sWgt loop
-
-    # Fit change in cost of three g-point options to a parabola and
-    # find minimum weight if parabola is concave;
-    # if that weight is outside the (-0.1,0.1) range or the 
-    # parabola is convex use the weight that leads to the 
-    # smallest increase or largest decrease in the  cost function;
-    xArr = [xWeight*w for w in xWeightCoeff] #[0.0, xWeight, 2*xWeight]
-    yArr = [val for val in delta.values()]
-    ymin = min(yArr)
-    imin = yArr.index(ymin)
-    coeff = np.polyfit(xArr, yArr, 2)
-    xMin = -coeff[1] / (2.0 * coeff[0])
-    if (yArr[imin] < 0):
-      xWeightNew = xArr[imin] - xArr[imin] * yArr[imin] / \
-        (yArr[imin] - yArr[0])
-    else:       
-      if (coeff[0] > 0.0):
-        print ("concave parabola ",xMin)
-        if (xMin < -xWeight or xMin > xWeight):
-          xWeightNew = xArr[imin]
-        else:
-          xWeightNew = xMin
-      else:
-        xWeightNew = xArr[imin]
-      # endif coeff0
-    # endif yArr_min
-
-    # Define newest g-point combination with new weight from line fit
-    coCopy = DCP(inObj)
-    dummy = 'mod'
-    newObj.gPointCombineSglPair(dummy, gCombine, xWeightNew)
-    newCoefFile = '{}/{}_{}.nc'.format(
-      newObj.workDir, fluxPath, dummy)
-    fluxFile = os.path.basename(newCoefFile).replace(
-      'coefficients', 'flux')
-
-    # flux and cost calculation with new weight
-    FCC.fluxCompute(newCoefFile, profiles, fluxExe, fluxDir, fluxFile)
-    trialNC = '{}/{}'.format(fluxDir, fluxFile)
-    coCopy.combinedNC[inObj.iOpt] = FCC.combineBandsSgl( 
-      inObj.optBand, inObj.fullBandFluxes, trialNC, inObj.doLW)
-    coCopy.costFuncCompSgl(coCopy.combinedNC[inObj.iOpt])
-    coCopy.fluxInputsAll[inObj.iOpt]['fluxNC'] = str(trialNC)
-    coCopy.optNC = str(newCoefFile)
-
-    if diagnostics: coCopy.costDiagnostics()
-
-    return coCopy
-  else:
-    return inObj
-# end modCombine()
