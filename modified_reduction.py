@@ -251,8 +251,12 @@ def modOptimal(coObjMod, coObjRep, iRedo, winnerCost0):
     # end comp loop
   # end reprocess loop
 
+  # at iter 95, these values were 146, 147, and 146, so dCostComps is a problem
+  for temp in [coObjMod.totalCost, coObjMod.dCostComps['flux_net'], coObjMod.costComps['flux_net']]: print(len(temp))
   coObjMod.findOptimal()
   coObjMod.costDiagnostics()
+
+  return coObjMod
 # end modOptimal()
 
 def kModSetupNextIter(inObj, weight0, scaleWeight='plus'):
@@ -348,10 +352,21 @@ def coModSetupNextIter(inObj):
     outObj.optBand = None
     outObj.optNC = None
 
+    for weight, comp in zip(outObj.costWeights, outObj.compNameCF):
+      scale = weight * 100 / outObj.cost0[comp][0]
+      outObj.costComp0[comp] = outObj.costComps[comp][outObj.iOpt]
+      outObj.dCostComps0[comp] = outObj.dCostComps[comp][outObj.iOpt]
+      outObj.cost0[comp].append(
+        outObj.costComp0[comp].sum().values * scale)
+      outObj.dCost0[comp].append(
+        outObj.dCostComps0[comp].sum().values * scale)
+    # end comp loop
+
+    outObj.iCombine += 1
     return outObj
 # end coSetupNextIterMod()
 
-def doBandTrials(inObj, kFiles):
+def doBandTrials(inObj, kFiles, weight=0.05):
   """
   Do the same thing as costModInit, scaleWeightRegress, 
   whereRecompute, and recompute, but only for a single 
@@ -374,6 +389,9 @@ def doBandTrials(inObj, kFiles):
 
   assert nNAN != 0, 'OBJECT WAS NOT RESET'
 
+  dCostMod = {}
+  dCostMod['init'] = np.array(inObj.totalCost)[iNAN] - inObj.winnerCost
+
   for key in kFiles.keys():
     # single object for given weight scale factor
     bandObj = DCP(inObj)
@@ -390,37 +408,29 @@ def doBandTrials(inObj, kFiles):
       kFile = kFiles[key][inan]
       inputs = inObj.fluxInputsAll[iTrial]
       inputs['kNC'] = str(kFile)
-      inputs['fluxNC'] = os.path.basename(kFile).replace(
+      fluxDir = PL.Path(kFile).with_suffix('')
+      fluxFile = os.path.basename(kFile).replace(
         'coefficients', 'flux')
-      # bandObj.trialNC.append(inputs['fluxNC'])
-      inputs['fluxDir'] = PL.Path(kFile).with_suffix('')
+      inputs['fluxNC'] = '{}/{}'.format(fluxDir, fluxFile)
+      inputs['fluxDir'] = fluxDir
 
       bandObj.fluxInputsAll.append(inputs)
     # end reprocessing loop
 
     # flux computation for single-band trials
     bandObj.fluxComputePool()
-    print(bandObj.trialNC)
-    sys.exit()
     bandObj.fluxCombine()
-    print(bandObj.combinedNC)
-    sys.exit()
-
-    """
-    for comp, cost0 in inObj.cost0.items():
-      bandObj.cost0[comp] = cost0[:-1]
-      bandObj.dCost0[comp] = inObj.dCost0[comp][:-1]
-      bandObj.costComps[comp] = inObj.costComps[comp][:-1]
-      bandObj.dCostComps[comp] = inObj.dCostComps[comp][:-1]
-      bandObj.costComp0[comp] = inObj.costComp0[comp]
-      bandObj.dCostComps0[comp] = inObj.dCostComps0[comp]
-    # end comp loop
-    """
 
     # cost calculation for band trials
-    bandObj.costFuncCompSgl() 
-
-    print(bandObj.totalCost)
+    bandObj.costFuncComp()
+    dCostMod[key] = np.array(bandObj.totalCost) - inObj.winnerCost
   # end key loop
-  return iNAN
+
+  # dCostMod, coObjNew = MODRED.costModInit(coObj0, kBandDict, diagnostics=True)
+  newScales, cross = scaleWeightRegress(dCostMod)
+  bandObjMod = whereRecompute(bandObj.distBands, bandObj, cross, 
+    newScales, weight=weight)
+  bandObjRep = recompute(bandObj, bandObjMod, cross)
+
+  return iNAN, bandObj
 # end doBandTrials()
