@@ -134,7 +134,8 @@ def scaleWeightRegress(dCostMod):
   return newScales, cross
 # end scaleWeightRegress()
 
-def whereRecompute(kBandAll, coObjMod, trialZero, scales, weight=0.05):
+def whereRecompute(kBandAll, coObjMod, trialZero, scales, 
+                   weight=0.05, doBand=None):
   """
   Determine where new flux and cost computations need to be made 
   (i.e., at zero crossings), recombine g-points, then replace 
@@ -146,10 +147,13 @@ def whereRecompute(kBandAll, coObjMod, trialZero, scales, weight=0.05):
   coObjMod -- gCombine_Cost object, likely output from costModInit
   scales -- float array [nTrial], scale factor used with `weight` in 
     modified g-point combining
+  doBand -- int, single unit-offset band number of band to process
+    if not set, all are processed
   """
 
   gCombineAll = []
   for iBand, key in enumerate(kBandAll.keys()):
+    if doBand is not None and iBand != doBand: continue
     band = iBand+1
     kNC = kBandAll[key].kInNC
 
@@ -251,8 +255,6 @@ def modOptimal(coObjMod, coObjRep, iRedo, winnerCost0):
     # end comp loop
   # end reprocess loop
 
-  # at iter 95, these values were 146, 147, and 146, so dCostComps is a problem
-  for temp in [coObjMod.totalCost, coObjMod.dCostComps['flux_net'], coObjMod.costComps['flux_net']]: print(len(temp))
   coObjMod.findOptimal()
   coObjMod.costDiagnostics()
 
@@ -347,7 +349,10 @@ def coModSetupNextIter(inObj):
     outObj.fluxInputsAll.pop(iRm)
     outObj.combinedNC.pop(iRm)
     outObj.trialNC.pop(iRm)
-    for comp in outObj.compNameCF: outObj.costComps[comp].pop(iRm)
+    for comp in outObj.compNameCF:
+      outObj.costComps[comp].pop(iRm)
+      outObj.dCostComps[comp].pop(iRm)
+    # end comp loop
     
     outObj.optBand = None
     outObj.optNC = None
@@ -426,11 +431,15 @@ def doBandTrials(inObj, kFiles, weight=0.05):
     dCostMod[key] = np.array(bandObj.totalCost) - inObj.winnerCost
   # end key loop
 
+  # band should be the same for each trial in bandObj
+  iBand = bandObj.fluxInputsAll[0]['bandID']
+
   # dCostMod, coObjNew = MODRED.costModInit(coObj0, kBandDict, diagnostics=True)
   newScales, cross = scaleWeightRegress(dCostMod)
   bandObjMod = whereRecompute(bandObj.distBands, bandObj, cross, 
-    newScales, weight=weight)
-  bandObjRep = recompute(bandObj, bandObjMod, cross)
+    newScales, weight=weight, doBand=iBand)
+  bandObjRep = recompute(bandObj, bandObjMod, np.where(cross)[0])
+  # print(np.array(bandObj.totalCost) - inObj.winnerCost)
 
   return iNAN, bandObj
 # end doBandTrials()
