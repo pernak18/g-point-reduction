@@ -242,7 +242,9 @@ def recompute(coObj0, coObjMod, iRedo):
 
 def modOptimal(coObjMod, coObjRep, iRedo, winnerCost0):
   """
+  Find optimal solution after modifying g-point combination approach
   """
+
   coObjMod.winnerCost = float(winnerCost0)
   for iRep, iMod in enumerate(iRedo): 
 
@@ -304,9 +306,15 @@ def coModSetupNextIter(inObj):
     inObj -- g_point_reduction.gCombine_Cost object after modified 
         g-point combining applied
     kFiles -- list of strings of files generated in kMod
+
+    Returns
+      outObj -- like inObj, but with NANs in the trials of band 
+        where winner was chosen
+      bandCosts -- float array, total costs of trials in "winner band"
     """
 
     outObj = DCP(inObj)
+    bandCosts = []
 
     # reset cost optimization attributes
     for weight, comp in zip(outObj.costWeights, outObj.compNameCF):
@@ -330,6 +338,9 @@ def coModSetupNextIter(inObj):
 
     # populate fill values into any trials associated with "winner" band
     for iTrial in outObj.iRecompute:
+      if iTrial != inObj.iOpt:
+        bandCosts.append(inObj.totalCost[iTrial])
+
       outObj.dCost[iTrial] = np.nan
       outObj.totalCost[iTrial] = np.nan
       outObj.combinedNC[iTrial] = None
@@ -368,10 +379,10 @@ def coModSetupNextIter(inObj):
     # end comp loop
 
     outObj.iCombine += 1
-    return outObj
+    return outObj, np.array(bandCosts)
 # end coSetupNextIterMod()
 
-def doBandTrials(inObj, kFiles, weight=0.05):
+def doBandTrials(inObj, kFiles, cost0, weight=0.05):
   """
   Do the same thing as costModInit, scaleWeightRegress, 
   whereRecompute, and recompute, but only for a single 
@@ -383,6 +394,9 @@ def doBandTrials(inObj, kFiles, weight=0.05):
   kFiles -- dictionary with 'plus' and `2plus' keys 
     whose values are lists of strings, new k-distribution netCDFs 
     generated for band after winner was selected
+  cost0 -- numpy float array, total costs of trials in band that 
+    contained winner in previous iteration (should correspond to 
+    where NANs are in inObj.totalCost)
   """
 
   # find trials of current iteration where costs need to be recomputed
@@ -395,7 +409,7 @@ def doBandTrials(inObj, kFiles, weight=0.05):
   assert nNAN != 0, 'OBJECT WAS NOT RESET'
 
   dCostMod = {}
-  dCostMod['init'] = np.array(inObj.totalCost)[iNAN] - inObj.winnerCost
+  dCostMod['init'] = cost0 - inObj.winnerCost
 
   for key in kFiles.keys():
     # single object for given weight scale factor
