@@ -425,10 +425,16 @@ class gCombine_kDist:
         # endwith kDS
     # end gPointCombine()
 
-    def gPointCombineSglPair(self,pmFlag,gCombine,xWeight):
+    def gPointCombineSglPair(self, gCombine, xWeight, suffix='mod'):
         """
         Combine g-points in a given band with adjacent g-point and
-        store into a netCDF for further processing
+        store into a netCDF for further processing. Works with a 
+        single g-point combination as opposed to all possible ones 
+        in a band
+
+        Returns
+          either path to netCDF4 where k-distribution has been 
+            modified, or None if modification was not possible
         """
 
         with xa.open_dataset(self.kInNC) as kDS:
@@ -440,20 +446,22 @@ class gCombine_kDist:
             # and associated weights for given band
             nNew = kDS.dims['gpt']-1
             wCombine = [weights[np.array(gc)] for gc in gCombine]
-            #print ("in gPointCombineSglPair")
-            #print ("self.iCombine")
-            #print (self.iCombine)
 
             for gc, wc in zip(gCombine, wCombine):
                 g1, g2 = gc
                 w1, w2 = wc
+
+                # provision to keep negative kmajor values from 
+                # being used in flux computation
+                # wkg2 = w2/(w1+w2)
+                # if wkg2 <= xWeight: return None
 
                 # loop over each g-point combination and create
                 # a k-distribution netCDF for each
                 gCombStr = 'g{:02d}-{:02d}_iter{:03d}'.format(
                     g1+1, g2+1, self.iCombine)
                 outNC='{}/coefficients_{}_{}_{}.nc'.format(
-                    self.workDir, self.domainStr, gCombStr,pmFlag)
+                    self.workDir, self.domainStr, gCombStr, suffix)
                 self.trialNC.append(outNC)
                 self.gCombStr.append(gCombStr)
 
@@ -467,10 +475,6 @@ class gCombine_kDist:
                 # band and iteration in given band
                 outDS.attrs['g_combine'] = '{}+{}'.format(g1+1, g2+1)
 
-                if pmFlag == '2plus':
-                    nscale = 2
-                else:
-                    nscale= 1
                 for ncVar in ncVars:
                     ncDat = xa.DataArray(kDS[ncVar])
                     varDims = ncDat.dims
@@ -484,11 +488,10 @@ class gCombine_kDist:
                             # replace g1' slice with weighted average of
                             # g1 and g2;
                             # dimensions get swapped for some reason
-                            delta = xWeight*nscale
-                            # print(xWeight,nscale,pmFlag,delta)
                             kg1, kg2 = ncDat.isel(gpt=g1), ncDat.isel(gpt=g2)
                             ncDat = xa.where(ncDat.gpt == g1,
-                                kg1*((w1/(w1+w2))+delta) + kg2*((w2/(w1+w2))-delta),ncDat)
+                                kg1*((w1/(w1+w2))+xWeight) + \
+                                kg2*((w2/(w1+w2))-xWeight), ncDat)
                             ncDat = ncDat.transpose(*varDims)
                         else:
                             # replace g1' weight with integrated values at
