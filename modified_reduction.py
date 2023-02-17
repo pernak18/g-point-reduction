@@ -23,13 +23,13 @@ def kModInit(kBand, coIter, weight=0.05, doLW=False,
   coIter -- current iteration of cost optimization process
   """
   # gPointCombineSglPair scales initial weights with either 
-  scaleWeight = [1, 2]
-  suffixes = ['wx1', 'wx2']
+  scaleWeight = ['plus', '2plus']
 
   kBandDict = {}
   kBandDict['init'] = dict(kBand)
 
-  for sWgt, suffix in zip(scaleWeight, suffixes):
+  for sWgt in scaleWeight:
+      print(sWgt)
       # replace existing kBandDict with modified objects
       kBandDict[sWgt] = {}
       for iBand, key in enumerate(kBand.keys()):
@@ -46,9 +46,8 @@ def kModInit(kBand, coIter, weight=0.05, doLW=False,
         gCombine = [[x, x+1] for x in range(nCombine)]
 
         # generate the k-dist netCDF for each combination in band
-        if iBand != 13: continue
         for comb in gCombine:
-          kObjMod.gPointCombineSglPair([comb], sWgt*weight, suffix=suffix)
+          kObjMod.gPointCombineSglPair(sWgt, [comb], weight)
 
         kBandDict[sWgt]['band{:02d}'.format(band)] = kObjMod
       # end kBand loop
@@ -136,7 +135,7 @@ def scaleWeightRegress(dCostMod):
 # end scaleWeightRegress()
 
 def whereRecompute(kBandAll, coObjMod, trialZero, scales, 
-                   weight=0.05, doBand=None, suffix='2plus'):
+                   weight=0.05, doBand=None):
   """
   Determine where new flux and cost computations need to be made 
   (i.e., at zero crossings), recombine g-points, then replace 
@@ -184,12 +183,12 @@ def whereRecompute(kBandAll, coObjMod, trialZero, scales,
         fullBandKDir=kBand.fullBandKDir, 
         fullBandFluxDir=kBand.fullBandFluxDir)
       kObjMod.gPointCombineSglPair(
-        [[g1, g2]], scales[iRep]*weight, suffix='wxr')
+        'regress', [[g1, g2]], scales[iRep]*weight)
 
       # replace flux computations i/o with modified files
       fields = ['kNC', 'fluxNC', 'fluxDir']
       for field in fields: coObjMod.fluxInputsAll[iRep][field] = \
-        str(fluxInputs[field]).replace(suffix, 'regress')
+        str(fluxInputs[field]).replace('2plus', 'regress')
 
       coObjMod.fluxInputsAll[iRep]['fluxDir'] = \
         PL.Path(coObjMod.fluxInputsAll[iRep]['fluxDir'])
@@ -264,7 +263,7 @@ def modOptimal(coObjMod, coObjRep, iRedo, winnerCost0):
   return coObjMod
 # end modOptimal()
 
-def kModSetupNextIter(inObj, weight0, scaleWeight=1, suffix='plus'):
+def kModSetupNextIter(inObj, weight0, scaleWeight='plus'):
     """
     setupNextIter upgrade to lessen computational footprint by preserving 
     information for bands that did not contain winner
@@ -292,8 +291,8 @@ def kModSetupNextIter(inObj, weight0, scaleWeight=1, suffix='plus'):
     # generate the k-dist netCDF for each combination in band
     kFiles = []
     for comb in gCombine:
-        kFiles.append(newObj.gPointCombineSglPair(
-          [comb], scaleWeight*weight0, suffix=suffix))
+        kFiles.append(
+          newObj.gPointCombineSglPair(scaleWeight, [comb], weight0))
     # end gCombine loop
 
     return newObj, kFiles
@@ -439,35 +438,12 @@ def doBandTrials(inObj, kFiles, cost0, weight=0.05):
 
     # flux computation for single-band trials
     bandObj.fluxComputePool()
+    bandObj.fluxCombine()
 
-    # provision for invalid kmajor values
-    # if kmajor was not in a valid range, the flux netCDF will not 
-    # have variables of interest (i.e., flux_*)
-    # if any one netCDF is incomplete, we have to redirect the code
-    invalid = False
-    iBad = []
-    for iNC, tNC in enumerate(bandObj.trialNC):
-      print(tNC)
-      with xa.open_dataset(tNC) as tDS:
-        if 'flux_up' not in list(tDS.keys()):
-          invalid = True
-          iBad.append(iNC)
-        # endif flux_up
-      # endwith
-    # end tNC loop
-
-    if invalid:
-      print(key, iBad)
-    else:
-      bandObj.fluxCombine()
-
-      # cost calculation for band trials
-      bandObj.costFuncComp()
-    # endif invalid
-
+    # cost calculation for band trials
+    bandObj.costFuncComp()
     dCostMod[key] = np.array(bandObj.totalCost) - inObj.winnerCost
   # end key loop
-  sys.exit()
 
   # band should be the same for each trial in bandObj
   iBand = bandObj.fluxInputsAll[0]['bandID']
