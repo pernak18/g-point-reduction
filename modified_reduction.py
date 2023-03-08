@@ -96,7 +96,12 @@ def costModInit(coObj0, bandKObjMod, scaleWeight=['plus', '2plus'],
 
       # proceed with subsequent cost optimization methods
       coObjMod.costFuncComp()
-      if diagnostics: coObjMod.costDiagnostics()
+      coObjMod.winnerCost = coObj0.winnerCost
+      if diagnostics:
+        print('{} Diagnostics:'.format(sWgt))
+        coObjMod.costDiagnostics()
+      # endif diag
+
       dCostMod[sWgt] = np.array(coObjMod.totalCost) - coObj0.winnerCost
   # end scaleWeight loop
 
@@ -240,9 +245,10 @@ def recompute(coObj0, coObjMod, iRedo):
   return coObjRep
 # end recompute()
 
-def modOptimal(coObjMod, coObjRep, iRedo, winnerCost0):
+def trialConsolidate(coObjMod, coObjRep, iRedo, winnerCost0, 
+               diagnostics=False):
   """
-  Find optimal solution after modifying g-point combination approach
+  Consolidate reprocessed trials with the rest
   """
 
   coObjMod.winnerCost = float(winnerCost0)
@@ -257,11 +263,29 @@ def modOptimal(coObjMod, coObjRep, iRedo, winnerCost0):
     # end comp loop
   # end reprocess loop
 
-  coObjMod.findOptimal()
-  coObjMod.costDiagnostics()
+  # this function used to be modOptimal(), but we need to run 
+  # recalibrate() before finding an optimal solution
+  # coObjMod.findOptimal()
+  # if diagnostics: coObjMod.costDiagnostics()
 
   return coObjMod
-# end modOptimal()
+# end trialConsolidate()
+
+def dCostTrialConsolidate(dCostAll, dCostBand, iRedo):
+  """
+  Same as trialConsolidate(), but with dCost dictionary
+  """
+
+  dCostOut = dict(dCostAll)
+
+  for key in dCostAll.keys():
+    for iRep, iMod in enumerate(iRedo):
+      dCostOut[key][iMod] = dCostBand[key][iRep]
+    # end reprocess loop
+  # end key loop
+
+  return dCostOut
+# end trialConsolidate()
 
 def kModSetupNextIter(inObj, weight0, scaleWeight='plus'):
     """
@@ -298,14 +322,16 @@ def kModSetupNextIter(inObj, weight0, scaleWeight='plus'):
     return newObj, kFiles
 # end kModSetupNextIter
 
-def coModSetupNextIter(inObj):
+def coModSetupNextIter(inObj, dCostDict):
     """
     setupNextIter upgrade to lessen computational footprint by preserving 
     information for bands that did not contain winner
 
     inObj -- g_point_reduction.gCombine_Cost object after modified 
         g-point combining applied
-    kFiles -- list of strings of files generated in kMod
+    dCostDict -- delta-cost dictionary that should have 'init', 
+      'plus', and '2plus' keys; these are the different dCosts for 
+      the 3 weights used in scaleWeightRegress
 
     Returns
       outObj -- like inObj, but with NANs in the trials of band 
@@ -343,8 +369,8 @@ def coModSetupNextIter(inObj):
 
       outObj.dCost[iTrial] = np.nan
       outObj.totalCost[iTrial] = np.nan
-      outObj.combinedNC[iTrial] = None
-      outObj.trialNC[iTrial] = None
+      # outObj.combinedNC[iTrial] = None
+      # outObj.trialNC[iTrial] = None
       outObj.fluxInputsAll[iTrial]['kNC'] = None
       outObj.fluxInputsAll[iTrial]['fluxNC'] = None
 
@@ -364,7 +390,11 @@ def coModSetupNextIter(inObj):
       outObj.costComps[comp].pop(iRm)
       outObj.dCostComps[comp].pop(iRm)
     # end comp loop
-    
+
+    # do same thing with delta-cost dictionary
+    for key, val in dCostDict.items():
+      dCostDict[key] = np.delete(val, iRm)
+
     outObj.optBand = None
     outObj.optNC = None
 
@@ -379,7 +409,7 @@ def coModSetupNextIter(inObj):
     # end comp loop
 
     outObj.iCombine += 1
-    return outObj, np.array(bandCosts)
+    return outObj, np.array(bandCosts), dCostDict
 # end coSetupNextIterMod()
 
 def doBandTrials(inObj, kFiles, cost0, weight=0.05):
@@ -453,7 +483,46 @@ def doBandTrials(inObj, kFiles, cost0, weight=0.05):
   bandObjMod = whereRecompute(bandObj.distBands, bandObj, cross, 
     newScales, weight=weight, doBand=iBand)
   bandObjRep = recompute(bandObj, bandObjMod, np.where(cross)[0])
-  # print(np.array(bandObj.totalCost) - inObj.winnerCost)
 
-  return iNAN, bandObj
+  return iNAN, bandObj, dCostMod
 # end doBandTrials()
+
+def recalibrate(inObj, dCostDict):
+  """
+  After a winner is chosen, costs for other trials change because the 
+  band corresponding to the winner has changed. Adjust the fluxes and 
+  delta costs from regression accordingly and print out recalibrated 
+  diagnostics
+
+  inObj -- cost optimization object after trial consolidation 
+    (trialConsolidate() was applied)
+  dCostDict -- dictionary with 'init', 'plus', and '2plus' fields
+   and associated arrays of trial dCost that will be adjusted
+  """
+
+  print('Recalibrating')
+
+  # flux recalucation with modified band
+  inObj.fluxCombine()
+  inObj.findOptimal()
+
+  dCostWin = inObj.totalCost[inObj.iOpt]-inObj.winnerCost
+
+  # adjust dCost arrays
+  for key, val in dCostDict.items(): dCostDict[key] = val + dCostWin
+
+  # just grab dCosts from regression for winner
+  diagCosts = [dCostDict[key][inObj.iOpt] for key in dCostDict.keys()]
+  print('Regression delta-costs:')
+  print('0: {} 0.05: {} 0.1: {}'.format(*diagCosts))
+  inObj.costDiagnostics()
+
+  # 1 less trial exists after winner is chosen, so dCostDict 
+  # needs to be transformed accordingly
+  # TO DO: i think i actually need to use dCostMod from doBandTrials 
+  # in here to replace the N trials in the winner band with N-1 trials
+  # for key in dCostDict.keys():
+  #   dCostDict[key] = np.delete(dCostDict[key], inObj.iOpt+1)
+
+  return inObj
+# end recalibrate

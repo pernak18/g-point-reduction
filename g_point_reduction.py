@@ -456,6 +456,7 @@ class gCombine_kDist:
                 # TO DO: also not robust
                 w2n = w2/(w1+w2)
                 if w2n <= delta: delta = float(xWeight)
+                if w2n <= delta: delta = 0
 
                 # loop over each g-point combination and create
                 # a k-distribution netCDF for each
