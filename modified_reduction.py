@@ -115,8 +115,31 @@ def scaleWeightRegress(dCostMod):
   # fit line for zero-crossing estimation
   abscissa = np.array([0, 1, 2])
   ordinates = np.vstack([dCost for dCost in dCostMod.values()])
-  coeffs = np.polyfit(abscissa, ordinates, 1)
+  iMinDelta = np.argmin(np.abs(ordinates), axis=0)
 
+  coeffs = np.polyfit(abscissa, ordinates, 2)
+  newScales = np.array(iMinDelta).astype(float)
+  cross = []
+  for iTrial, coeff in enumerate(coeffs.T):
+    poly = np.poly1d(coeff)
+    roots = np.roots(coeff)
+    iReplace = np.where((roots >= 0) & (roots <= 2) & np.all(np.isreal(roots)))[0]
+    nReplace = iReplace.size
+
+    # usually nReplace is just 1, unless there are complex roots
+    if nReplace == 1:
+      newScales[iTrial] = roots[iReplace]
+      cross.append(True)
+    else:
+      cross.append(False)
+    # endif nReplace
+  # end coeff loop
+
+  cross = np.array(cross)
+  # TO DO: need to replace some trials in newScales with parabola
+  # minimum -- we've only replaced with dCost min or a zero-crossing
+
+  """
   # for noCross, we keep whatever scale weight produced (positive) minimum
   # and do not need to re-run flux/cost calcs
   # new scale factors for weights will start as just the scale that 
@@ -135,6 +158,7 @@ def scaleWeightRegress(dCostMod):
   iNan = np.where(np.isnan(newScales))
   y0[iNan] = ordinates[2, iNan]
   newScales[iNan] = (xMin - xMin * yMin / (yMin - y0))[iNan]
+  """
 
   return newScales, cross
 # end scaleWeightRegress()
@@ -378,6 +402,10 @@ def coModSetupNextIter(inObj, dCostDict):
         outObj.costComps[comp][iTrial][:] = np.nan
     # end invalid trial loop
 
+    # TO DO: if iRm == len(totalCost) (or others besides dCost), 
+    # outObj.costComp0[outObj.opt] and dCostComps0[outObj.opt] fails
+    # since we remove the last element
+    # why am i doing pop()?
     # decrement number of trials in prep for next iter
     # print(inObj.totalCost[inObj.iOpt], outObj.totalCost[inObj.iOpt])
     iRm = inObj.iOpt
@@ -392,8 +420,8 @@ def coModSetupNextIter(inObj, dCostDict):
     # end comp loop
 
     # do same thing with delta-cost dictionary
-    for key, val in dCostDict.items():
-      dCostDict[key] = np.delete(val, iRm)
+    # for key, val in dCostDict.items():
+    #   dCostDict[key] = np.delete(val, iRm)
 
     outObj.optBand = None
     outObj.optNC = None
