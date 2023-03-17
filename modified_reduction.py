@@ -62,10 +62,13 @@ def costModInit(coObj0, bandKObjMod, scaleWeight=['plus', '2plus'],
   coObj0 -- gCombine_Cost object before modified g-point combining
   bandKObjMod -- dictionary containing gCombine_kDist objects for 
     each band (1 key per band)
+  idModTrial -- indices of trials after initial modified combinations
+    but before any winners are selected with the modifications
   """
 
   dCostMod = {}
   dCostMod['init'] = np.array(coObj0.totalCost) - coObj0.winnerCost
+  idModTrial = np.arange(len(dCostMod['init']))
 
   for sWgt in scaleWeight:
       coObjMod = REDUX.gCombine_Cost(
@@ -105,10 +108,10 @@ def costModInit(coObj0, bandKObjMod, scaleWeight=['plus', '2plus'],
       dCostMod[sWgt] = np.array(coObjMod.totalCost) - coObj0.winnerCost
   # end scaleWeight loop
 
-  return dCostMod, coObjMod
+  return dCostMod, coObjMod, idModTrial
 # end costModInit()
 
-def scaleWeightRegress(dCostMod):
+def scaleWeightRegress(dCostMod, returnCoeffs=False):
   """
   dCostMod -- dictionary from costModInit
   """
@@ -136,9 +139,8 @@ def scaleWeightRegress(dCostMod):
   # end coeff loop
 
   cross = np.array(cross)
-  # TO DO: need to replace some trials in newScales with parabola
-  # minimum -- we've only replaced with dCost min or a zero-crossing
 
+  # linear regression
   """
   # for noCross, we keep whatever scale weight produced (positive) minimum
   # and do not need to re-run flux/cost calcs
@@ -160,7 +162,10 @@ def scaleWeightRegress(dCostMod):
   newScales[iNan] = (xMin - xMin * yMin / (yMin - y0))[iNan]
   """
 
-  return newScales, cross
+  if returnCoeffs:
+    return newScales, cross, coeffs
+  else:
+    return newScales, cross
 # end scaleWeightRegress()
 
 def whereRecompute(kBandAll, coObjMod, trialZero, scales, 
@@ -198,7 +203,8 @@ def whereRecompute(kBandAll, coObjMod, trialZero, scales,
 
   # loop over all trials with a zero crossing
   iReprocess = np.where(trialZero)[0]
-  for iRep in tqdm(iReprocess):
+  # for iRep in tqdm(iReprocess):
+  for iRep in iReprocess:
       # grab k-distribution for each band BEFORE g-point combining 
       # for this iteration
       fluxInputs = coObjMod.fluxInputsAll[iRep]
@@ -346,7 +352,7 @@ def kModSetupNextIter(inObj, weight0, scaleWeight='plus'):
     return newObj, kFiles
 # end kModSetupNextIter
 
-def coModSetupNextIter(inObj, dCostDict):
+def coModSetupNextIter(inObj, idModTrial):
     """
     setupNextIter upgrade to lessen computational footprint by preserving 
     information for bands that did not contain winner
@@ -356,6 +362,7 @@ def coModSetupNextIter(inObj, dCostDict):
     dCostDict -- delta-cost dictionary that should have 'init', 
       'plus', and '2plus' keys; these are the different dCosts for 
       the 3 weights used in scaleWeightRegress
+    idModTrial -- see costModInit doc
 
     Returns
       outObj -- like inObj, but with NANs in the trials of band 
@@ -414,14 +421,11 @@ def coModSetupNextIter(inObj, dCostDict):
     outObj.fluxInputsAll.pop(iRm)
     outObj.combinedNC.pop(iRm)
     outObj.trialNC.pop(iRm)
+    idModTrial.pop(iRm)
     for comp in outObj.compNameCF:
       outObj.costComps[comp].pop(iRm)
       outObj.dCostComps[comp].pop(iRm)
     # end comp loop
-
-    # do same thing with delta-cost dictionary
-    # for key, val in dCostDict.items():
-    #   dCostDict[key] = np.delete(val, iRm)
 
     outObj.optBand = None
     outObj.optNC = None
@@ -437,7 +441,8 @@ def coModSetupNextIter(inObj, dCostDict):
     # end comp loop
 
     outObj.iCombine += 1
-    return outObj, np.array(bandCosts), dCostDict
+
+    return outObj, np.array(bandCosts), idModTrial
 # end coSetupNextIterMod()
 
 def doBandTrials(inObj, kFiles, cost0, weight=0.05):
@@ -512,10 +517,10 @@ def doBandTrials(inObj, kFiles, cost0, weight=0.05):
     newScales, weight=weight, doBand=iBand)
   bandObjRep = recompute(bandObj, bandObjMod, np.where(cross)[0])
 
-  return iNAN, bandObj, dCostMod
+  return iNAN, bandObj#, dCostMod
 # end doBandTrials()
 
-def recalibrate(inObj, dCostDict):
+def recalibrate(inObj, dCostDict, offset, idModTrial, weight=0.05):
   """
   After a winner is chosen, costs for other trials change because the 
   band corresponding to the winner has changed. Adjust the fluxes and 
@@ -525,32 +530,89 @@ def recalibrate(inObj, dCostDict):
   inObj -- cost optimization object after trial consolidation 
     (trialConsolidate() was applied)
   dCostDict -- dictionary with 'init', 'plus', and '2plus' fields
-   and associated arrays of trial dCost that will be adjusted
+    and associated arrays of trial dCost that will be adjusted
+  offset -- baseline cost used in dCostDict
+  idModTrial -- see costModInit
   """
 
-  print('Recalibrating')
+  # local module (part of repo)
+  from rrtmgp_cost_compute import flux_cost_compute as FCC
 
-  # flux recalucation with modified band
+  print('Refitting parabolas and recalibrating fluxes')
+
+  # only keep dCost for remaining trials, then adjust dCost with
+  # costs from previous iteration
+  dCostRC = {}
+  for key, val in dCostDict.items():
+    dCostRC[key] = []
+    for iTrial in idModTrial:
+      # first convert to full costs
+      # note: these lists are of size whatever-ntrial-is-at-this-iter
+      dCostRC[key].append(val[iTrial] + offset - inObj.winnerCost)
+    # end trial loop
+  # end key loop
+
+  # refit parabolas
+  scales, cross, fits = scaleWeightRegress(
+    dCostRC, returnCoeffs=True)
+
+  # fitted delta-costs from which winner will be chosen
+  dCostFit = []
+  for fit, scale in zip(fits, scales):
+    dCostPoly = np.poly1d(fit)  
+    print(fit)
+    print(scale)
+    dCostFit.append(dCostPoly(scale))
+  # end fit/scale loop
+  for dcf in dCostFit: print(dcf)
+  sys.exit()
+
+  # find minimum dCost based on regression roots
+  inObj.iOpt = np.argmin(dCostFit)
+
+  # generate new k and flux files for winner
+  fia = inObj.fluxInputsAll[inObj.iOpt]
+  kNC = fia['kNC']
+  if 'regress' in kNC:
+    # '2plus' and 'plus' k-files are still valid because 
+    # no roots were found and thus no new weight scale necessary
+    # convention: coefficients_LW_g02-03_iter094_2plus.nc
+    split = PL.Path(kNC).name.split('_')
+    gComb = split[2]
+    g1, g2 = int(gComb[1:3]), int(gComb[4:])
+    bandStr = 'band{:02d}'.format(fia['bandID']+1)
+
+    # this will overwrite whatever has been written for this 
+    # g-pt combo regressed solution at this iteration
+    print('New k file')
+    inObj.distBands[bandStr].gPointCombineSglPair(
+      'regress', [[g1, g2]], scales[inObj.iOpt]*weight)
+
+    # flux calculation for optimal trial
+    print('Recalibrating flux')
+    FCC.fluxCompute(fia['kNC'], fia['profiles'], \
+      fia['exe'], fia['fluxDir'], fia['fluxNC'])
+  # endif kNC
+
+  # flux recalucation for all trials with modified band
   inObj.fluxCombine()
+
+  print(inObj.iOpt)
   inObj.findOptimal()
 
-  dCostWin = inObj.totalCost[inObj.iOpt]-inObj.winnerCost
-
-  # adjust dCost arrays
-  for key, val in dCostDict.items(): dCostDict[key] = val + dCostWin
+  # this should match previous print(inObj.iOpt) before findOptimal()
+  print(inObj.iOpt)
 
   # just grab dCosts from regression for winner
-  diagCosts = [dCostDict[key][inObj.iOpt] for key in dCostDict.keys()]
+  diagCosts = [dCostRC[key][inObj.iOpt] for key in dCostRC.keys()]
   print('Regression delta-costs:')
   print('0: {} 0.05: {} 0.1: {}'.format(*diagCosts))
-  inObj.costDiagnostics()
 
-  # 1 less trial exists after winner is chosen, so dCostDict 
-  # needs to be transformed accordingly
-  # TO DO: i think i actually need to use dCostMod from doBandTrials 
-  # in here to replace the N trials in the winner band with N-1 trials
-  # for key in dCostDict.keys():
-  #   dCostDict[key] = np.delete(dCostDict[key], inObj.iOpt+1)
+  # because costFuncComp calculates total cost and components, 
+  # that information can still be used and no new calculations 
+  # are needed after parabola fit (since the fit is to dCost, 
+  # which is dependent on total cost and the previous winner cost)
+  inObj.costDiagnostics()
 
   return inObj
 # end recalibrate
