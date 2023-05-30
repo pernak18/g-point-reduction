@@ -940,7 +940,7 @@ class gCombine_Cost:
         #lblDS.close()
     # end costFuncCompSgl
 
-    def findOptimal(self):
+    def findOptimal(self, fromFit=False, iOptFit=None):
         """
         Determine which g-point combination for a given iteration in a band
         optimized the cost function, save the associated k netCDF
@@ -955,32 +955,35 @@ class gCombine_Cost:
         dCost = np.array(self.totalCost)-self.winnerCost
 
         while True:
-            # find optimizal k-distribution
-            self.iOpt = np.nanargmin(np.abs(dCost))
-            optNC = self.fluxInputsAll[self.iOpt]['kNC']
+          # find optimizal k-distribution
+          self.iOpt = np.nanargmin(np.abs(dCost))
+          optNC = self.fluxInputsAll[self.iOpt]['kNC']
 
-            # if no more g-point combining is possible for associated band, 
-            # find the optimization in a different band
-            with xa.open_dataset(optNC) as optDS: nGpt = optDS.dims['gpt']
+          # if no more g-point combining is possible for associated band, 
+          # find the optimization in a different band
+          with xa.open_dataset(optNC) as optDS: nGpt = optDS.dims['gpt']
 
-            if nGpt > 1: break
+          if nGpt > 1: break
 
-            # remove trial from consideration if no more g-point combining 
-            # is possible
-            self.fluxInputsAll.pop(self.iOpt)
-            self.combinedNC.pop(self.iOpt)
-            self.totalCost.pop(self.iOpt)
-            self.dCost.pop(self.iOpt)
-            for comp in self.compNameCF:
-                self.costComps[comp].pop(self.iOpt)
-                self.dCostComps[comp].pop(self.iOpt)
-            # end comp loop
+          # find optimal solution outside of band that has been 
+          # fully reduced; totalCost is the only parameter 
+          # that needs to be reassigned because it determines 
+          # the winner
+          # using a large number instead of NaN so polyfit 
+          # can be applied downstream
+          self.totalCost[self.iOpt] = 1e6
+          dCost = np.array(self.totalCost)-self.winnerCost
+          # self.dCost[self.iOpt] = np.nan
+          # for comp in self.compNameCF:
+          #   self.costComps[comp][self.iOpt] = np.nan
+          #   self.dCostComps[comp][self.iOpt] = np.nan
+          # end comp loop
 
-            # no more trial to consider
-            if len(self.totalCost) == 0:
-                self.optimized = True
-                return
-            # endif 0
+          # no more trial to consider
+          if len(self.totalCost) == 0:
+            self.optimized = True
+            return
+          # endif 0
         # end while
 
         self.optBand = self.fluxInputsAll[self.iOpt]['bandID']
