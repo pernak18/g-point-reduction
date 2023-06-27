@@ -19,7 +19,7 @@ import xarray as xa
 from rrtmgp_cost_compute import flux_cost_compute as FCC
 
 # GLOBAL VARIABLES (paths)
-PROJECT = '/global/project/projectdirs/e3sm/pernak18/'
+PROJECT = '/global/cfs/projectdirs/e3sm/pernak18'
 EXE = '{}/g-point-reduction/garand_atmos/rrtmgp_garand_atmos'.format(
     PROJECT)
 GARAND = '{}/reference_netCDF/g-point-reduce/'.format(PROJECT) + \
@@ -432,7 +432,14 @@ class gCombine_kDist:
         """
 
         # TO DO: NOT ROBUST -- really limited weight scaling
-        nscale = 2 if pmFlag == '2plus' else 1
+        if pmFlag == '2plus':
+          nscale = 2
+        elif pmFlag == 'plus':
+          nscale = 1
+        else:
+          nscale = 0
+        # endif pmflag
+
         delta = xWeight*nscale
 
         with xa.open_dataset(self.kInNC) as kDS:

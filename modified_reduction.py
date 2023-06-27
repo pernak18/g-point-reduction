@@ -23,10 +23,10 @@ def kModInit(kBand, coIter, weight=0.05, doLW=False,
   coIter -- current iteration of cost optimization process
   """
   # gPointCombineSglPair scales initial weights with either 
-  scaleWeight = ['plus', '2plus']
+  scaleWeight = ['init', 'plus', '2plus']
 
   kBandDict = {}
-  kBandDict['init'] = dict(kBand)
+  # kBandDict['init'] = dict(kBand)
 
   for sWgt in scaleWeight:
       # print(sWgt)
@@ -56,8 +56,9 @@ def kModInit(kBand, coIter, weight=0.05, doLW=False,
   return kBandDict
 # end kModInit()
 
-def costModInit(coObj0, bandKObjMod, scaleWeight=['plus', '2plus'], 
-               diagnostics=False):
+def costModInit(coObj0, bandKObjMod, 
+                scaleWeight=['init', 'plus', '2plus'], 
+                diagnostics=False):
   """
   coObj0 -- gCombine_Cost object before modified g-point combining
   bandKObjMod -- dictionary containing gCombine_kDist objects for 
@@ -123,9 +124,11 @@ def scaleWeightRegress(dCostMod, returnCoeffs=False):
   for iTrial, coeff in enumerate(coeffs.T):
     poly = np.poly1d(coeff)
     roots = np.roots(coeff)
+    # print(iTrial, roots)
     iReplace = np.where((
       roots >= 0) & (roots <= 2) & np.all(np.isreal(roots)))[0]
     nReplace = iReplace.size
+    # if nReplace > 0: print(iTrial, roots, iReplace)
 
     # usually nReplace is just 1, unless there are complex roots
     if nReplace == 1:
@@ -234,6 +237,40 @@ def whereRecompute(kBandAll, coObjMod, trialZero, scales,
 
   return coObjMod
 # end whereRecompute()
+
+def noRecompute(coObjMod, scales, cross):
+  """
+  replace k dist netCDF for trials where no flux recalculation 
+  is needed (i.e., where there are no valid zero crossings)
+  
+  coObjMod -- object modified in costModInit()
+  scales, cross -- outputs from scaleWeightRegress()
+    should be the same length, and should also be consistent 
+    with 
+  """
+
+  fia = coObjMod.fluxInputsAll
+  nFIA = len(fia)
+  nScales = len(scales)
+  nCross = len(cross)
+  # TO DO: check for this pythonically
+  # assert nFIA == nScale == nCross             
+  for iFIA, fi in enumerate(fia):
+    scale = scales[iFIA]
+
+    if cross[iFIA]:
+      # skip zero crossing
+      continue
+    elif scale in [0, 1]:
+      optScale = 'init' if scale == 0 else 'plus'
+      # replace k and flux computations i/o with non-modified (init)  
+      # or different weight scale (1plus)
+      fields = ['kNC', 'fluxNC', 'fluxDir']
+      for field in fields: coObjMod.fluxInputsAll[iFIA][field] = \
+        str(fi[field]).replace('2plus', optScale)
+    # endif scale
+
+# end noRecompute()
 
 def recompute(coObj0, coObjMod, iRedo):
   """
@@ -457,7 +494,7 @@ def doBandTrials(inObj, kFiles, bandCost0, dCostMod,
   # coSetupNextIterMod
 
   # TO DO: method of NaN search is obsolete -- just need optBand
-  optBand = inObj.fluxInputsAll[inObj.iOpt]['bandID']
+  optBand = inObj.fluxInputsAll[inObj.iOpt-1]['bandID']
   bandIDs = np.array(
     [fia['bandID'] for fia in inObj.fluxInputsAll]).astype(int)
   iNAN = np.where(bandIDs == inObj.optBand)[0]
@@ -727,6 +764,7 @@ def repeat_mod_redux(inObj, doLW=False, iniWgt=0.05,
   dCostMod, coObjMod = costModInit(inObj, kBandDict)
   newScales, cross = scaleWeightRegress(dCostMod)
 
+  noRecompute(coObjMod, newScales, cross)
   coObjMod = whereRecompute(
     kBand, coObjMod, cross, newScales, weight=iniWgt)
   coObjRep = recompute(inObj, coObjMod, np.where(cross)[0])
@@ -739,7 +777,7 @@ def repeat_mod_redux(inObj, doLW=False, iniWgt=0.05,
   # kFiles will likely just contain plus and 2plus (no init), 
   # because we're always doing the modified combination at this point
   kFiles = {}
-  for sWgt in ['plus', '2plus']:
+  for sWgt in ['init', 'plus', '2plus']:
     objModCP = DCP(coObjMod)
     bandStr = 'band{:02d}'.format(coObjMod.optBand+1)
     kBandDict[sWgt][bandStr], kFiles[sWgt] = kModSetupNextIter(
