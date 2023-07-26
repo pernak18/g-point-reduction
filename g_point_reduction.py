@@ -19,9 +19,11 @@ import xarray as xa
 from rrtmgp_cost_compute import flux_cost_compute as FCC
 
 # GLOBAL VARIABLES (paths)
-PROJECT = '/global/cfs/projectdirs/e3sm/pernak18'
+PROJECT = '/global/project/projectdirs/e3sm/pernak18/'
+PROJECT = '/global/cfs/projectdirs/e3sm/pernak18/'
 EXE = '{}/g-point-reduction/garand_atmos/rrtmgp_garand_atmos'.format(
     PROJECT)
+EXE = '/pscratch/sd/p/pernak18/RRTMGP/quad_regress_abs_val/garand_atmos/rrtmgp_garand_atmos'
 GARAND = '{}/reference_netCDF/g-point-reduce/'.format(PROJECT) + \
   'multi_garand_template_single_band.nc'
 CWD = os.getcwd()
@@ -432,14 +434,7 @@ class gCombine_kDist:
         """
 
         # TO DO: NOT ROBUST -- really limited weight scaling
-        if pmFlag == '2plus':
-          nscale = 2
-        elif pmFlag == 'plus':
-          nscale = 1
-        else:
-          nscale = 0
-        # endif pmflag
-
+        nscale = 2 if pmFlag == '2plus' else 1
         delta = xWeight*nscale
 
         with xa.open_dataset(self.kInNC) as kDS:
@@ -738,7 +733,7 @@ class gCombine_Cost:
             kObj = self.distBands[band]
             bandKey = 'Band{:02d}'.format(iBand+1)
 
-            for nc in kObj.trialNC:
+            for iNC, nc in enumerate(kObj.trialNC):
                 # flux directory is same path as netCDF without .nc extension
                 fluxDir = PL.Path(nc).with_suffix('')
 
@@ -787,20 +782,6 @@ class gCombine_Cost:
         # corresponding band numbers (zero-offset)
         bandIDs = [inputs['bandID'] for inputs in self.fluxInputsAll]
 
-        # open all of the full-band netCDFs as xarray datasets
-        # will be combined accordingly with single-band g-point combinations
-        """
-        fullDS = []
-        for bandNC in self.fullBandFluxes:
-            with xa.open_dataset(bandNC) as bandDS:
-                bandDS.load()
-                fullDS.append(bandDS)
-            # end with
-        # end bandNC loop
-        """
-
-        #print('Combining trial fluxes with full-band fluxes')
-
         workdirCombine = PL.Path('./combinedBands_trials')
         if not workdirCombine.is_dir(): os.makedirs(workdirCombine)
 
@@ -835,18 +816,6 @@ class gCombine_Cost:
         Keywords
             init -- boolean, evalulate the cost function for the initial, 
                 full g-point k-distribution
-        """
-
-        from itertools import repeat
-
-        #print('Calculating cost for each trial')
-
-        """
-        if init:
-            with xa.open_dataset(self.rrtmgpNC) as rrtmDS: allDS = [rrtmDS]
-        else:
-            allDS = [xa.open_dataset(combNC) for combNC in self.combinedNC]
-        # endif init
         """
 
         # normalize to get HR an fluxes on same scale
@@ -1068,7 +1037,7 @@ class gCombine_Cost:
         #print('Wrote cost components to {}'.format(outNC))
     # end costDiagnostics()
 
-    def setupNextIter(self):
+    def setupNextIter(self, increment=True):
         """
         Re-orient object for band that optimized cost function -- i.e., 
         prepare it for another set of g-point combinations. Also clean up 
@@ -1083,7 +1052,7 @@ class gCombine_Cost:
 
         # combine g-points for next iteration
         #print('Recombining')
-        self.iCombine += 1
+        if increment: self.iCombine += 1
         newObj = gCombine_kDist(self.optNC, self.optBand, 
             bandObj.doLW, self.iCombine, fullBandKDir=bandObj.fullBandKDir, 
             fullBandFluxDir=bandObj.fullBandFluxDir)
@@ -1106,7 +1075,8 @@ class gCombine_Cost:
             self.fluxInputsAll[self.iOpt]['fluxNC']
         self.fluxInputsAll = []
 
-        for combNC in self.combinedNC: os.remove(combNC)
+        if increment:
+          for combNC in self.combinedNC: os.remove(combNC)
         self.winnerCost = self.totalCost[self.iOpt]
         self.combinedNC = []
         self.dCost = []
