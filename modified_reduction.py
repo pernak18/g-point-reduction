@@ -123,6 +123,8 @@ def scaleWeightRegress(dCostMod, returnCoeffs=False):
   for iTrial, coeff in enumerate(coeffs.T):
     poly = np.poly1d(coeff)
     roots = np.roots(coeff)
+
+    # TO DO: root limits should be a flexible parameter
     iReplace = np.where((
       roots >= 0) & (roots <= 2) & np.all(np.isreal(roots)))[0]
     nReplace = iReplace.size
@@ -183,18 +185,15 @@ def whereRecompute(kBandAll, coObjMod, trialZero, scales,
   # label regression trials
   scaleStr = np.repeat('_regress', iReprocess.size)
 
-  # the trials where unmodified combination or the 'plus' modification 
+  # the trials where the 'plus' modification 
   # are better than '2plus' should be pretty small, so we'll just 
   # recalculate these guys as well
   # TO DO: not optimal
-  i0 = np.where(scales == 0)[0]
   i1 = np.where(scales == 1)[0]
-  iReprocess = np.append(iReprocess, i0)
   iReprocess = np.append(iReprocess, i1)
 
   # distinguish regression trials from unmod and `plus` mod
-  scaleStr = np.append(scaleStr, np.repeat('', i0.size))
-  scaleStr = np.append(scaleStr, np.repeat('', i1.size))
+  scaleStr = np.append(scaleStr, np.repeat('_plus', i1.size))
 
   for iRep, sStr in zip(iReprocess, scaleStr):
       # grab k-distribution for each band BEFORE g-point combining 
@@ -224,10 +223,10 @@ def whereRecompute(kBandAll, coObjMod, trialZero, scales,
         PL.Path(coObjMod.fluxInputsAll[iRep]['fluxDir'])
   # end reprocessing loop
 
-  return coObjMod
+  return coObjMod, iReprocess
 # end whereRecompute()
 
-def recompute(coObj0, coObjMod, iRedo):
+def recompute(coObj0, coObjMod, scales, iRedo):
   """
   Recompute fluxes for only trials that need to be preprocessed
   (i.e., modified g-point combination is initiated or a band 
@@ -236,10 +235,28 @@ def recompute(coObj0, coObjMod, iRedo):
   coObj0 -- gCombine_Cost object, should be original object before 
     modification was applied
   coObjMod -- gCombine_Cost object, should be output from costModInit
+  scales -- output from whereRecompute()
   iRedo -- int array, trials for which computation is re-done
   """
 
   coObjRep = DCP(coObjMod)
+
+  # need to account for the trials where perturbations only worsened 
+  # dCost wrt initial modification
+  iInit = np.where(scales == 0)[0]
+
+  # TO DO: recomputation for init seems unnecessary, but i don't know 
+  # how the 2plus dCost propogated when 0 was the lowest dCost in a trial
+  iRedo = np.append(iRedo, iInit)
+
+  for i0 in iInit: 
+    # replace flux computations i/o with modified files
+    fields = ['kNC', 'fluxNC', 'fluxDir']
+    for field in fields: 
+      coObjRep.fluxInputsAll[i0][field] = \
+        coObj0.fluxInputsAll[i0][field]
+    # end field loop
+  # end iInit loop
 
   # reprocessing should only be done over trials with a zero crossing
   # convert to array so we can use iRedo, then convert 
@@ -267,7 +284,7 @@ def recompute(coObj0, coObjMod, iRedo):
 
   coObjRep.costFuncComp()  
   
-  return coObjRep
+  return coObjRep, iRedo
 # end recompute()
 
 def trialConsolidate(coObjMod, coObjRep, iRedo, winnerCost0, 
@@ -288,143 +305,8 @@ def trialConsolidate(coObjMod, coObjRep, iRedo, winnerCost0,
     # end comp loop
   # end reprocess loop
 
-  # this function used to be modOptimal(), but we need to run 
-  # recalibrate() before finding an optimal solution
-  # coObjMod.findOptimal()
-  # if diagnostics: coObjMod.costDiagnostics()
-
   return coObjMod
 # end trialConsolidate()
-
-def kModSetupNextIter(inObj, weight0, scaleWeight='plus'):
-    """
-    setupNextIter upgrade to lessen computational footprint by preserving 
-    information for bands that did not contain winner
-
-    inObj -- g_point_reduction.gCombine_Cost object after modified 
-        g-point combining applied
-    """
-
-    bandKey = list(inObj.distBands.keys())[inObj.optBand]
-    bandObj = inObj.distBands[bandKey]
-
-    # combine g-points for next iteration
-    inObj.iCombine += 1
-    newObj = REDUX.gCombine_kDist(inObj.optNC, inObj.optBand, 
-        bandObj.doLW, inObj.iCombine, fullBandKDir=bandObj.fullBandKDir, 
-        fullBandFluxDir=bandObj.fullBandFluxDir)
-
-    # at this point, we're always doing the modified combining
-    # how many combinations exist for band?
-    with xa.open_dataset(inObj.optNC) as ds: nCombine = ds.dims['gpt']-1
-
-    # g-point indices, and its combination "partner"
-    gCombine = [[x, x+1] for x in range(nCombine)]
-
-    # generate the k-dist netCDF for each combination in band
-    kFiles = []
-    for comb in gCombine:
-        kFiles.append(
-          newObj.gPointCombineSglPair(scaleWeight, [comb], weight0))
-    # end gCombine loop
-
-    return newObj, kFiles
-# end kModSetupNextIter
-
-def coModSetupNextIter(inObj, dCostMod):
-    """
-    setupNextIter upgrade to lessen computational footprint by preserving 
-    information for bands that did not contain winner
-
-    inObj -- g_point_reduction.gCombine_Cost object after modified 
-        g-point combining applied
-    iRemain -- int list, index of trials that remain after modified 
-      combination
-
-    Returns
-      outObj -- like inObj, but with NANs in the trials of band 
-        where winner was chosen
-      bandCosts -- float array, total costs of trials in "winner band"
-    """
-
-    outObj = DCP(inObj)
-    bandCosts = []
-
-    # reset cost optimization attributes
-    for weight, comp in zip(outObj.costWeights, outObj.compNameCF):
-        scale = weight * 100 / outObj.cost0[comp][0]
-        outObj.costComp0[comp] = outObj.costComps[comp][outObj.iOpt]
-        outObj.dCostComps0[comp] = outObj.dCostComps[comp][outObj.iOpt]
-        outObj.cost0[comp].append(
-          outObj.costComp0[comp].sum().values * scale)
-        outObj.dCost0[comp].append(
-          outObj.dCostComps0[comp].sum().values * scale)
-    # end comp loop
-
-    outObj.fullBandFluxes[int(inObj.optBand)] = \
-        outObj.fluxInputsAll[inObj.iOpt]['fluxNC']
-
-    outObj.winnerCost = inObj.totalCost[outObj.iOpt]
-
-    # new object attribute of what trials need to be recomputed in next trial
-    bandIDs = np.array([fia['bandID'] for fia in inObj.fluxInputsAll])
-    outObj.iRecompute = np.where(bandIDs == inObj.optBand)[0]
-
-    # populate fill values into any trials associated with "winner" band
-    for iTrial in outObj.iRecompute:
-      if iTrial != inObj.iOpt:
-        bandCosts.append(inObj.totalCost[iTrial])
-
-      outObj.dCost[iTrial] = np.nan
-      outObj.totalCost[iTrial] = np.nan
-      # outObj.combinedNC[iTrial] = None
-      # outObj.trialNC[iTrial] = None
-      outObj.fluxInputsAll[iTrial]['kNC'] = None
-      outObj.fluxInputsAll[iTrial]['fluxNC'] = None
-
-      for comp in outObj.compNameCF:
-        outObj.costComps[comp][iTrial][:] = np.nan
-    # end invalid trial loop
-
-    iRm = inObj.iOpt
-    outObj.dCost.pop(iRm)
-    outObj.totalCost.pop(iRm)
-    outObj.fluxInputsAll.pop(iRm)
-    outObj.combinedNC.pop(iRm)
-    outObj.trialNC.pop(iRm)
-    for comp in outObj.compNameCF:
-      outObj.costComps[comp].pop(iRm)
-      outObj.dCostComps[comp].pop(iRm)
-    # end comp loop
-
-    for scale in ['plus', '2plus']:
-      dCostMod[scale] = np.delete(dCostMod[scale], iRm)
-
-    # NOTE: indexing at iOpt at iteration 143 was crashing because 
-    # iOpt is the last trial, then when remove that element with iRm
-    # easy fix is to do iOpt-1 at this point, but we have not applied
-    # it to the results from iteration 94-142, so their cost components
-    # are slightly wrong
-    # i actually think this still might be wrong, because i think  
-    # decrementing depends on the placement of the trial in the 
-    # band, but we're gonna go with this 
-    for weight, comp in zip(outObj.costWeights, outObj.compNameCF):
-      scale = weight * 100 / outObj.cost0[comp][0]
-      outObj.costComp0[comp] = outObj.costComps[comp][outObj.iOpt-1]
-      outObj.dCostComps0[comp] = outObj.dCostComps[comp][outObj.iOpt-1]
-      outObj.cost0[comp].append(
-        outObj.costComp0[comp].sum().values * scale)
-      outObj.dCost0[comp].append(
-        outObj.dCostComps0[comp].sum().values * scale)
-    # end comp loop
-
-    # need to do this eventually, but also need optBand for doBandTrials
-    # outObj.optBand = None
-    # outObj.optNC = None
-
-    outObj.iCombine += 1
-    return outObj, np.array(bandCosts), dCostMod
-# end coSetupNextIterMod()
 
 def doBandTrials(inObj, kFiles, bandCost0, dCostMod, 
                  weight=0.05):
@@ -560,12 +442,19 @@ def repeat_mod_redux(inObj, doLW=False, iniWgt=0.05,
   dCostMod, coObjMod = costModInit(inObj, kBandDict)
   newScales, cross = scaleWeightRegress(dCostMod)
 
-  coObjMod = whereRecompute(
+  coObjMod, iRecompute = whereRecompute(
     kBand, coObjMod, cross, newScales, weight=iniWgt)
-  coObjRep = recompute(inObj, coObjMod, np.where(cross)[0])
+  coObjRep, iRecompute = recompute(inObj, coObjMod, newScales, iRecompute)
   coObjMod = trialConsolidate(
-    coObjMod, coObjRep, np.where(cross)[0], inObj.winnerCost)
+    coObjMod, coObjRep, iRecompute, inObj.winnerCost)
   coObjMod.iCombine = inObj.iCombine
+
+  # some trials have less than 3 dCost points to which to fit and 
+  # are thus not valid
+  # TO DO: linear regression instead? different weight scales in fit?
+  dCostArr = [dCostMod['init'], dCostMod['plus'], dCostMod['2plus']]
+  for iBad, dca in enumerate(np.array(dCostArr).T):
+    if np.unique(dca).size < 3: coObjMod.totalCost[iBad] = np.nan
 
   coObjRC = recalibrate(coObjMod)
   parabolaDiag(coObjRC, inObj.winnerCost, dCostMod, newScales)
@@ -587,6 +476,7 @@ def repeat_mod_redux(inObj, doLW=False, iniWgt=0.05,
 def parabolaDiag(inObj, cost0, dCostMod, scales):
   import pandas as PD
 
+  # TO DO: g-point labels, number of g-points (use kNC)
   metric = np.array(inObj.totalCost)-cost0
   iSort = np.argsort(np.abs(metric))
 
